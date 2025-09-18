@@ -106,7 +106,7 @@ impl Config {
     fn from_env() -> anyhow::Result<Self> {
         let mut args = env::args_os().skip(1);
 
-        let path = if let Ok(path) = env::var("XCSTRINGS_PATH") {
+        let path = if let Ok(path) = env_var("STRINGS_PATH", "XCSTRINGS_PATH") {
             Some(PathBuf::from(path))
         } else {
             let mut candidate = args.next();
@@ -116,8 +116,9 @@ impl Config {
             candidate.map(PathBuf::from)
         };
 
-        let host = env::var("XCSTRINGS_WEB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = if let Ok(port) = env::var("XCSTRINGS_WEB_PORT") {
+        let host = env_var("WEB_HOST", "XCSTRINGS_WEB_HOST")
+            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = if let Ok(port) = env_var("WEB_PORT", "XCSTRINGS_WEB_PORT") {
             port
         } else {
             args.next()
@@ -132,4 +133,11 @@ impl Config {
 
         Ok(Self { path, web_addr })
     }
+}
+
+fn env_var(primary: &str, legacy: &str) -> Result<String, env::VarError> {
+    env::var(primary).or_else(|primary_err| match primary_err {
+        env::VarError::NotPresent => env::var(legacy),
+        err => Err(err),
+    })
 }

@@ -32,7 +32,7 @@ The web interface becomes available at `http://<host>:<port>/`.
 ### MCP usage
 Run the binary with stdio transport (default) and wire it into an MCP-enabled client. The following tools are exposed (each expects a `path` argument pointing to the target `.xcstrings` file):
 
-- `list_translations(path, query?)`
+- `list_translations(path, query?, limit?, include_values?)`
 - `get_translation(path, key, language)`
 - `upsert_translation(path, key, language, value?, state?, variations?)`
 - `delete_translation(path, key, language)`
@@ -41,6 +41,8 @@ Run the binary with stdio transport (default) and wire it into an MCP-enabled cl
 - `list_languages(path)`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
+
+`list_translations` now returns compact summaries (`key`, `comment`, `languages`, and `hasVariations`) so responses stay lightweight even for large catalogs. Use `limit` (defaults to 100, set to `0` for no limit) to page through results, and pass `include_values: true` when you intentionally want the full translation payload inline. Pair it with `get_translation` for per-language details without flooding the client context.
 
 The optional `variations` argument mirrors the `.xcstrings` schema. Provide an object that maps selectors (for example `"plural"`) to their cases, where each case includes the same shape as `upsert_translation` (value, state, nested variations). Missing selectors or cases are left untouched so you can patch individual plural entries without resending the entire localization.
 

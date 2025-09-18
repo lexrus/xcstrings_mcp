@@ -236,6 +236,15 @@ pub struct TranslationRecord {
     pub translations: BTreeMap<String, TranslationValue>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslationSummary {
+    pub key: String,
+    pub comment: Option<String>,
+    pub languages: Vec<String>,
+    #[serde(rename = "hasVariations")]
+    pub has_variations: bool,
+}
+
 #[derive(Clone)]
 pub struct XcStringsStore {
     path: PathBuf,
@@ -365,6 +374,44 @@ impl XcStringsStore {
                     key: key.clone(),
                     comment,
                     translations,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn list_summaries(&self, filter: Option<&str>) -> Vec<TranslationSummary> {
+        let query = filter.map(|s| s.to_lowercase());
+        let doc = self.data.read().await;
+        doc.strings
+            .iter()
+            .filter_map(|(key, entry)| {
+                if let Some(q) = &query {
+                    let matches_key = key.to_lowercase().contains(q);
+                    let matches_value = entry
+                        .localizations
+                        .values()
+                        .any(|loc| localization_contains(loc, q));
+                    if !matches_key && !matches_value {
+                        return None;
+                    }
+                }
+
+                let comment = entry
+                    .extra
+                    .get("comment")
+                    .and_then(|value| value.as_str().map(|s| s.to_string()));
+
+                let languages = entry.localizations.keys().cloned().collect();
+                let has_variations = entry
+                    .localizations
+                    .values()
+                    .any(|loc| !loc.variations.is_empty());
+
+                Some(TranslationSummary {
+                    key: key.clone(),
+                    comment,
+                    languages,
+                    has_variations,
                 })
             })
             .collect()
@@ -608,6 +655,39 @@ mod tests {
             .expect("clear comment");
         let records = store.list_records(None).await;
         assert!(records[0].comment.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_summaries_returns_languages_and_variation_flag() {
+        let tmp = TempStorePath::new("list_summaries");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save en");
+        let plural_update = TranslationUpdate::from_value_state(None, None).add_variation(
+            "plural",
+            "other",
+            TranslationUpdate::from_value_state(Some("Hallo alle".into()), None),
+        );
+        store
+            .upsert_translation("greeting", "de", plural_update)
+            .await
+            .expect("save de");
+
+        let summaries = store.list_summaries(None).await;
+        assert_eq!(summaries.len(), 1);
+        let summary = &summaries[0];
+        assert_eq!(summary.key, "greeting");
+        assert_eq!(summary.languages, vec!["de".to_string(), "en".to_string()]);
+        assert!(summary.has_variations);
     }
 
     #[tokio::test]

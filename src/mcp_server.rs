@@ -9,12 +9,12 @@ use rmcp::{
     tool, tool_handler, tool_router, ErrorData as McpError,
 };
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::store::{
-    StoreError, TranslationRecord, TranslationUpdate, TranslationValue, XcStringsStore,
-    XcStringsStoreManager,
+    StoreError, TranslationRecord, TranslationSummary, TranslationUpdate, TranslationValue,
+    XcStringsStore, XcStringsStoreManager,
 };
 
 #[derive(Clone)]
@@ -22,6 +22,8 @@ pub struct XcStringsMcpServer {
     stores: Arc<XcStringsStoreManager>,
     tool_router: ToolRouter<Self>,
 }
+
+const DEFAULT_LIST_LIMIT: usize = 100;
 
 impl XcStringsMcpServer {
     pub fn new(stores: Arc<XcStringsStoreManager>) -> Self {
@@ -65,6 +67,12 @@ struct ListTranslationsParams {
     pub path: String,
     /// Optional case-insensitive search query
     pub query: Option<String>,
+    /// Optional maximum number of items to return (defaults to 100)
+    #[serde(default)]
+    pub limit: Option<u32>,
+    /// Include full translation payloads; defaults to false for compact summaries
+    #[serde(default)]
+    pub include_values: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -177,18 +185,24 @@ fn to_json_text<T: serde::Serialize>(value: &T) -> String {
     })
 }
 
-fn render_translation_records(records: Vec<TranslationRecord>) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(to_json_text(&records))])
+#[derive(Debug, Serialize)]
+struct TranslationListResponse<T> {
+    items: Vec<T>,
+    total: usize,
+    returned: usize,
+    truncated: bool,
+}
+
+fn render_json<T: serde::Serialize>(value: &T) -> CallToolResult {
+    CallToolResult::success(vec![Content::text(to_json_text(value))])
 }
 
 fn render_translation_value(value: Option<TranslationValue>) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(to_json_text(&value))])
+    render_json(&value)
 }
 
 fn render_languages(languages: Vec<String>) -> CallToolResult {
-    CallToolResult::success(vec![Content::text(to_json_text(&serde_json::json!({
-        "languages": languages,
-    })))])
+    render_json(&serde_json::json!({ "languages": languages }))
 }
 
 fn render_ok_message(message: &str) -> CallToolResult {
@@ -205,8 +219,38 @@ impl XcStringsMcpServer {
         let params = params.0;
         let query = params.query.as_deref();
         let store = self.store_for(Some(params.path.as_str())).await?;
-        let records = store.list_records(query).await;
-        Ok(render_translation_records(records))
+        let limit = params
+            .limit
+            .map(|value| value as usize)
+            .unwrap_or(DEFAULT_LIST_LIMIT);
+        let limit = if limit == 0 { usize::MAX } else { limit };
+        let include_values = params.include_values.unwrap_or(false);
+
+        if include_values {
+            let records = store.list_records(query).await;
+            let total = records.len();
+            let items: Vec<TranslationRecord> = records.into_iter().take(limit).collect();
+            let truncated = total > items.len();
+            let response = TranslationListResponse {
+                returned: items.len(),
+                total,
+                truncated,
+                items,
+            };
+            Ok(render_json(&response))
+        } else {
+            let summaries = store.list_summaries(query).await;
+            let total = summaries.len();
+            let items: Vec<TranslationSummary> = summaries.into_iter().take(limit).collect();
+            let truncated = total > items.len();
+            let response = TranslationListResponse {
+                returned: items.len(),
+                total,
+                truncated,
+                items,
+            };
+            Ok(render_json(&response))
+        }
     }
 
     #[tool(description = "Fetch a single translation by key and language")]
@@ -382,17 +426,85 @@ mod tests {
             .list_translations(Parameters(ListTranslationsParams {
                 path: path_str.clone(),
                 query: None,
+                limit: None,
+                include_values: None,
             }))
             .await
             .expect("tool success");
 
         let payload = parse_json(&result);
-        let items = payload.as_array().expect("array payload");
+        assert_eq!(payload.get("total").and_then(|v| v.as_u64()), Some(1));
+        assert_eq!(payload.get("returned").and_then(|v| v.as_u64()), Some(1));
+        let items = payload
+            .get("items")
+            .and_then(|v| v.as_array())
+            .expect("array payload");
         assert_eq!(items.len(), 1);
+        let item = &items[0];
+        assert_eq!(item.get("key").and_then(|v| v.as_str()), Some("greeting"));
+        assert!(item.get("translations").is_none());
+        let languages = item
+            .get("languages")
+            .and_then(|v| v.as_array())
+            .expect("languages array");
+        assert_eq!(languages.len(), 1);
+        assert_eq!(languages[0].as_str(), Some("en"));
         assert_eq!(
-            items[0].get("key").and_then(|v| v.as_str()),
-            Some("greeting")
+            item.get("hasVariations").and_then(|v| v.as_bool()),
+            Some(false)
         );
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn list_translations_tool_can_include_values() {
+        let path = fresh_store_path("list_translations_full");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save translation");
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let result = server
+            .list_translations(Parameters(ListTranslationsParams {
+                path: path_str.clone(),
+                query: None,
+                limit: None,
+                include_values: Some(true),
+            }))
+            .await
+            .expect("tool success");
+
+        let payload = parse_json(&result);
+        let items = payload
+            .get("items")
+            .and_then(|v| v.as_array())
+            .expect("array payload");
+        assert_eq!(items.len(), 1);
+        let translations = items[0]
+            .get("translations")
+            .and_then(|v| v.as_object())
+            .expect("translations map");
+        assert!(translations.contains_key("en"));
+        let greeting = translations
+            .get("en")
+            .and_then(|v| v.get("value"))
+            .and_then(|v| v.as_str());
+        assert_eq!(greeting, Some("Hello"));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

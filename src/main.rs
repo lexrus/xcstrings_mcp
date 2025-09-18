@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, ffi::OsStr, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use rmcp::service::ServiceExt;
 use tokio::signal;
@@ -108,10 +108,12 @@ impl Config {
 
         let path = if let Ok(path) = env::var("XCSTRINGS_PATH") {
             Some(PathBuf::from(path))
-        } else if let Some(arg) = args.next() {
-            Some(PathBuf::from(arg))
         } else {
-            None
+            let mut candidate = args.next();
+            if matches!(candidate.as_ref(), Some(arg) if arg == OsStr::new("--")) {
+                candidate = args.next();
+            }
+            candidate.map(PathBuf::from)
         };
 
         let host = env::var("XCSTRINGS_WEB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());

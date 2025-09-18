@@ -43,6 +43,8 @@ pub struct XcStringEntry {
 pub struct XcLocalization {
     #[serde(rename = "stringUnit", default)]
     pub string_unit: Option<XcStringUnit>,
+    #[serde(rename = "variations", default)]
+    pub variations: BTreeMap<String, BTreeMap<String, XcLocalization>>, // nesting mirrors xcstrings schema
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -57,10 +59,172 @@ pub struct XcStringUnit {
     pub extra: BTreeMap<String, Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TranslationValue {
     pub value: Option<String>,
     pub state: Option<String>,
+    #[serde(default)]
+    pub variations: BTreeMap<String, BTreeMap<String, TranslationValue>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TranslationUpdate {
+    pub value: Option<Option<String>>,
+    pub state: Option<Option<String>>,
+    #[serde(default)]
+    pub variations: Option<BTreeMap<String, BTreeMap<String, TranslationUpdate>>>,
+}
+
+impl TranslationValue {
+    fn from_localization(loc: &XcLocalization) -> Self {
+        let value = loc.string_unit.as_ref().and_then(|unit| unit.value.clone());
+        let state = loc.string_unit.as_ref().and_then(|unit| unit.state.clone());
+        let variations = loc
+            .variations
+            .iter()
+            .map(|(selector, cases)| {
+                let converted = cases
+                    .iter()
+                    .map(|(case, nested)| {
+                        (case.clone(), TranslationValue::from_localization(nested))
+                    })
+                    .collect();
+                (selector.clone(), converted)
+            })
+            .collect();
+
+        TranslationValue {
+            value,
+            state,
+            variations,
+        }
+    }
+}
+
+impl TranslationUpdate {
+    pub fn from_value_state(value: Option<String>, state: Option<String>) -> Self {
+        Self {
+            value: Some(value),
+            state: Some(state),
+            variations: None,
+        }
+    }
+
+    pub fn with_variations(
+        mut self,
+        variations: BTreeMap<String, BTreeMap<String, TranslationUpdate>>,
+    ) -> Self {
+        self.variations = Some(variations);
+        self
+    }
+
+    pub fn add_variation(
+        mut self,
+        selector: impl Into<String>,
+        case: impl Into<String>,
+        update: TranslationUpdate,
+    ) -> Self {
+        let selector = selector.into();
+        let case = case.into();
+        let variations = self.variations.get_or_insert_with(BTreeMap::new);
+        let selector_entry = variations.entry(selector).or_insert_with(BTreeMap::new);
+        selector_entry.insert(case, update);
+        self
+    }
+}
+
+impl From<TranslationValue> for TranslationUpdate {
+    fn from(value: TranslationValue) -> Self {
+        let mut update = TranslationUpdate {
+            value: Some(value.value),
+            state: Some(value.state),
+            variations: None,
+        };
+
+        if !value.variations.is_empty() {
+            let nested = value
+                .variations
+                .into_iter()
+                .map(|(selector, cases)| {
+                    let cases = cases
+                        .into_iter()
+                        .map(|(case, inner)| (case, TranslationUpdate::from(inner)))
+                        .collect();
+                    (selector, cases)
+                })
+                .collect();
+            update.variations = Some(nested);
+        }
+
+        update
+    }
+}
+
+fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
+    let mut unit = target.string_unit.clone().unwrap_or_default();
+
+    if let Some(value) = update.value {
+        unit.value = value;
+    }
+
+    if let Some(state) = update.state {
+        unit.state = state;
+    }
+
+    if unit.value.is_some() || unit.state.is_some() || !unit.extra.is_empty() {
+        target.string_unit = Some(unit);
+    } else {
+        target.string_unit = None;
+    }
+
+    if let Some(variations) = update.variations {
+        let mut existing_variations = std::mem::take(&mut target.variations);
+
+        for (selector, cases_update) in variations {
+            let mut selector_entry = existing_variations.remove(&selector).unwrap_or_default();
+
+            for (case_key, nested_update) in cases_update {
+                let mut nested_loc = selector_entry
+                    .remove(&case_key)
+                    .unwrap_or_else(XcLocalization::default);
+                apply_update(&mut nested_loc, nested_update);
+
+                if nested_loc.string_unit.is_none()
+                    && nested_loc.variations.is_empty()
+                    && nested_loc.extra.is_empty()
+                {
+                    continue;
+                }
+
+                selector_entry.insert(case_key, nested_loc);
+            }
+
+            if !selector_entry.is_empty() {
+                target.variations.insert(selector, selector_entry);
+            }
+        }
+
+        // re-add untouched selectors
+        target.variations.extend(existing_variations);
+    }
+}
+
+fn localization_contains(loc: &XcLocalization, query: &str) -> bool {
+    if loc
+        .string_unit
+        .as_ref()
+        .and_then(|unit| unit.value.as_ref())
+        .map(|value| value.to_lowercase().contains(query))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    loc.variations.values().any(|cases| {
+        cases
+            .values()
+            .any(|nested| localization_contains(nested, query))
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,13 +293,10 @@ impl XcStringsStore {
             .filter_map(|(key, entry)| {
                 if let Some(q) = &query {
                     let matches_key = key.to_lowercase().contains(q);
-                    let matches_value = entry.localizations.values().any(|loc| {
-                        loc.string_unit
-                            .as_ref()
-                            .and_then(|unit| unit.value.as_ref())
-                            .map(|value| value.to_lowercase().contains(q))
-                            .unwrap_or(false)
-                    });
+                    let matches_value = entry
+                        .localizations
+                        .values()
+                        .any(|loc| localization_contains(loc, q));
                     if !matches_key && !matches_value {
                         return None;
                     }
@@ -144,20 +305,7 @@ impl XcStringsStore {
                 let translations = entry
                     .localizations
                     .iter()
-                    .map(|(lang, loc)| {
-                        let value = loc
-                            .string_unit
-                            .as_ref()
-                            .map(|unit| TranslationValue {
-                                value: unit.value.clone(),
-                                state: unit.state.clone(),
-                            })
-                            .unwrap_or_else(|| TranslationValue {
-                                value: None,
-                                state: None,
-                            });
-                        (lang.clone(), value)
-                    })
+                    .map(|(lang, loc)| (lang.clone(), TranslationValue::from_localization(loc)))
                     .collect();
 
                 let comment = entry
@@ -184,18 +332,14 @@ impl XcStringsStore {
             .strings
             .get(key)
             .and_then(|entry| entry.localizations.get(language))
-            .map(|loc| TranslationValue {
-                value: loc.string_unit.as_ref().and_then(|unit| unit.value.clone()),
-                state: loc.string_unit.as_ref().and_then(|unit| unit.state.clone()),
-            }))
+            .map(TranslationValue::from_localization))
     }
 
     pub async fn upsert_translation(
         &self,
         key: &str,
         language: &str,
-        value: Option<String>,
-        state: Option<String>,
+        update: TranslationUpdate,
     ) -> Result<TranslationValue, StoreError> {
         let mut doc = self.data.write().await;
         let entry = doc
@@ -208,16 +352,15 @@ impl XcStringsStore {
             .entry(language.to_string())
             .or_insert_with(XcLocalization::default);
 
-        let mut unit = loc.string_unit.clone().unwrap_or_default();
-        unit.value = value.clone();
-        unit.state = state.clone();
-        loc.string_unit = Some(unit);
+        apply_update(loc, update);
+
+        let updated = TranslationValue::from_localization(loc);
 
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
 
-        Ok(TranslationValue { value, state })
+        Ok(updated)
     }
 
     pub async fn delete_translation(&self, key: &str, language: &str) -> Result<(), StoreError> {
@@ -327,11 +470,19 @@ mod tests {
             .expect("load store");
 
         store
-            .upsert_translation("greeting", "en", Some("Hello".into()), None)
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
             .await
             .expect("upsert");
         store
-            .upsert_translation("greeting", "fr", Some("Bonjour".into()), None)
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
             .await
             .expect("upsert");
 
@@ -360,7 +511,11 @@ mod tests {
             .expect("load store");
 
         store
-            .upsert_translation("farewell", "en", Some("Bye".into()), None)
+            .upsert_translation(
+                "farewell",
+                "en",
+                TranslationUpdate::from_value_state(Some("Bye".into()), None),
+            )
             .await
             .expect("upsert");
 
@@ -402,5 +557,116 @@ mod tests {
             .expect("clear comment");
         let records = store.list_records(None).await;
         assert!(records[0].comment.is_none());
+    }
+
+    #[tokio::test]
+    async fn plural_variations_round_trip() {
+        let tmp = TempStorePath::new("plural_round_trip");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        let update = TranslationUpdate::from_value_state(None, None)
+            .add_variation(
+                "plural",
+                "one",
+                TranslationUpdate::from_value_state(
+                    Some("One file".into()),
+                    Some("translated".into()),
+                ),
+            )
+            .add_variation(
+                "plural",
+                "other",
+                TranslationUpdate::from_value_state(
+                    Some("{count} files".into()),
+                    Some("translated".into()),
+                ),
+            );
+
+        store
+            .upsert_translation("file_count", "en", update)
+            .await
+            .expect("save plural");
+
+        let value = store
+            .get_translation("file_count", "en")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        assert!(value.value.is_none());
+        let plural = value
+            .variations
+            .get("plural")
+            .expect("plural selector present");
+        assert_eq!(
+            plural.get("one").and_then(|entry| entry.value.as_deref()),
+            Some("One file")
+        );
+        assert_eq!(
+            plural.get("other").and_then(|entry| entry.value.as_deref()),
+            Some("{count} files")
+        );
+
+        let records = store.list_records(Some("files")).await;
+        assert_eq!(records.len(), 1);
+        assert!(records[0]
+            .translations
+            .get("en")
+            .and_then(|entry| entry.variations.get("plural"))
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn plural_variation_merge_preserves_existing() {
+        let tmp = TempStorePath::new("plural_merge");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        let initial = TranslationUpdate::from_value_state(None, None)
+            .add_variation(
+                "plural",
+                "one",
+                TranslationUpdate::from_value_state(Some("One".into()), None),
+            )
+            .add_variation(
+                "plural",
+                "other",
+                TranslationUpdate::from_value_state(Some("Many".into()), None),
+            );
+        store
+            .upsert_translation("items", "en", initial)
+            .await
+            .expect("save");
+
+        let patch = TranslationUpdate::from_value_state(None, None).add_variation(
+            "plural",
+            "one",
+            TranslationUpdate::from_value_state(Some("Exactly one".into()), None),
+        );
+        store
+            .upsert_translation("items", "en", patch)
+            .await
+            .expect("patch");
+
+        let value = store
+            .get_translation("items", "en")
+            .await
+            .expect("fetch")
+            .expect("exists");
+        let plural = value
+            .variations
+            .get("plural")
+            .expect("plural variations available");
+        assert_eq!(
+            plural.get("one").and_then(|entry| entry.value.as_deref()),
+            Some("Exactly one")
+        );
+        assert_eq!(
+            plural.get("other").and_then(|entry| entry.value.as_deref()),
+            Some("Many")
+        );
     }
 }

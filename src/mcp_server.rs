@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc};
+use std::{collections::BTreeMap, future::Future, sync::Arc};
 
 use rmcp::{
     handler::server::{
@@ -12,7 +12,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json;
 
-use crate::store::{StoreError, TranslationRecord, TranslationValue, XcStringsStore};
+use crate::store::{
+    StoreError, TranslationRecord, TranslationUpdate, TranslationValue, XcStringsStore,
+};
 
 #[derive(Clone)]
 pub struct XcStringsMcpServer {
@@ -62,8 +64,68 @@ struct GetTranslationParams {
 struct UpsertTranslationParams {
     pub key: String,
     pub language: String,
-    pub value: Option<String>,
-    pub state: Option<String>,
+    #[serde(default)]
+    pub value: Option<Option<String>>,
+    #[serde(default)]
+    pub state: Option<Option<String>>,
+    #[serde(default)]
+    pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema, Clone)]
+struct VariationUpdateParam {
+    #[serde(default)]
+    pub value: Option<Option<String>>,
+    #[serde(default)]
+    pub state: Option<Option<String>>,
+    #[serde(default)]
+    pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
+}
+
+impl VariationUpdateParam {
+    fn into_update(self) -> TranslationUpdate {
+        let mut update = TranslationUpdate::default();
+        update.value = self.value;
+        update.state = self.state;
+        if let Some(variations) = self.variations {
+            update.variations = Some(
+                variations
+                    .into_iter()
+                    .map(|(selector, cases)| {
+                        let cases = cases
+                            .into_iter()
+                            .map(|(case, nested)| (case, nested.into_update()))
+                            .collect();
+                        (selector, cases)
+                    })
+                    .collect(),
+            );
+        }
+        update
+    }
+}
+
+impl UpsertTranslationParams {
+    fn into_update(self) -> TranslationUpdate {
+        let mut update = TranslationUpdate::default();
+        update.value = self.value;
+        update.state = self.state;
+        if let Some(variations) = self.variations {
+            update.variations = Some(
+                variations
+                    .into_iter()
+                    .map(|(selector, cases)| {
+                        let cases = cases
+                            .into_iter()
+                            .map(|(case, nested)| (case, nested.into_update()))
+                            .collect();
+                        (selector, cases)
+                    })
+                    .collect(),
+            );
+        }
+        update
+    }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -143,14 +205,12 @@ impl XcStringsMcpServer {
         params: Parameters<UpsertTranslationParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
+        let key = params.key.clone();
+        let language = params.language.clone();
+        let update = params.into_update();
         let updated = self
             .store
-            .upsert_translation(
-                &params.key,
-                &params.language,
-                params.value.clone(),
-                params.state.clone(),
-            )
+            .upsert_translation(&key, &language, update)
             .await
             .map_err(Self::error_to_mcp)?;
         Ok(render_translation_value(Some(updated)))
@@ -223,8 +283,9 @@ impl rmcp::ServerHandler for XcStringsMcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::XcStringsStore;
+    use crate::store::{TranslationUpdate, XcStringsStore};
     use std::{
+        collections::BTreeMap,
         path::PathBuf,
         sync::atomic::{AtomicUsize, Ordering},
         time::{SystemTime, UNIX_EPOCH},
@@ -267,7 +328,11 @@ mod tests {
                 .expect("load store"),
         );
         store
-            .upsert_translation("greeting", "en", Some("Hello".into()), None)
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
             .await
             .expect("save translation");
         let server = XcStringsMcpServer::new(store);
@@ -296,11 +361,19 @@ mod tests {
                 .expect("load store"),
         );
         store
-            .upsert_translation("greeting", "en", Some("Hello".into()), None)
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
             .await
             .expect("save translation");
         store
-            .upsert_translation("greeting", "fr", Some("Bonjour".into()), None)
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
             .await
             .expect("save translation");
         let server = XcStringsMcpServer::new(store);
@@ -313,6 +386,70 @@ mod tests {
             .expect("languages array");
         assert!(languages.iter().any(|v| v.as_str() == Some("en")));
         assert!(languages.iter().any(|v| v.as_str() == Some("fr")));
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn upsert_translation_tool_supports_plural_variations() {
+        let path = fresh_store_path("upsert_plural");
+        let store = Arc::new(
+            XcStringsStore::load_or_create(&path)
+                .await
+                .expect("load store"),
+        );
+        let server = XcStringsMcpServer::new(store.clone());
+
+        let mut plural_cases = BTreeMap::new();
+        plural_cases.insert(
+            "one".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("One".into())),
+                state: None,
+                variations: None,
+            },
+        );
+        plural_cases.insert(
+            "other".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("Many".into())),
+                state: None,
+                variations: None,
+            },
+        );
+
+        let mut variations = BTreeMap::new();
+        variations.insert("plural".to_string(), plural_cases);
+
+        server
+            .upsert_translation(Parameters(UpsertTranslationParams {
+                key: "items".into(),
+                language: "en".into(),
+                value: None,
+                state: None,
+                variations: Some(variations),
+            }))
+            .await
+            .expect("tool success");
+
+        let translation = store
+            .get_translation("items", "en")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        let plural = translation
+            .variations
+            .get("plural")
+            .expect("plural selector present");
+        assert_eq!(
+            plural.get("one").and_then(|entry| entry.value.as_deref()),
+            Some("One"),
+        );
+        assert_eq!(
+            plural.get("other").and_then(|entry| entry.value.as_deref()),
+            Some("Many"),
+        );
+
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

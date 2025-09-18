@@ -4,9 +4,9 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 
 ## Features
 - Async-safe store that loads and persists `Localizable.xcstrings` JSON on every change.
-- MCP toolset for listing, retrieving, creating, updating, and deleting translations and comments.
+- MCP toolset for listing, retrieving, creating, updating, and deleting translations (including plural variations) and comments.
 - Tool for enumerating all languages discovered in the file.
-- Embedded Axum web UI for browsing translations, filtering by query, editing values, and managing comments.
+- Embedded Axum web UI for browsing translations, filtering by query, editing values, plural variations, and managing comments.
 - JSON-first responses from tools to make automation and debugging easier.
 
 ## Prerequisites
@@ -34,13 +34,15 @@ Run the binary with stdio transport (default) and wire it into an MCP-enabled cl
 
 - `list_translations(query?)`
 - `get_translation(key, language)`
-- `upsert_translation(key, language, value?, state?)`
+- `upsert_translation(key, language, value?, state?, variations?)`
 - `delete_translation(key, language)`
 - `delete_key(key)`
 - `set_comment(key, comment?)`
 - `list_languages()`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
+
+The optional `variations` argument mirrors the `.xcstrings` schema. Provide an object that maps selectors (for example `"plural"`) to their cases, where each case includes the same shape as `upsert_translation` (value, state, nested variations). Missing selectors or cases are left untouched so you can patch individual plural entries without resending the entire localization.
 
 ## Development
 Install dependencies and run the full test suite:

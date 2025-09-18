@@ -46,6 +46,9 @@ impl XcStringsMcpServer {
             StoreError::KeyMissing(key) => {
                 McpError::resource_not_found(format!("Key '{key}' not found"), None)
             }
+            StoreError::KeyExists(key) => {
+                McpError::invalid_params(format!("Key '{key}' already exists"), None)
+            }
             StoreError::PathRequired => McpError::invalid_params(
                 "xcstrings path must be provided via tool arguments".to_string(),
                 None,

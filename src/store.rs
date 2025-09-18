@@ -19,6 +19,8 @@ pub enum StoreError {
     TranslationMissing { key: String, language: String },
     #[error("string key '{0}' not found")]
     KeyMissing(String),
+    #[error("string key '{0}' already exists")]
+    KeyExists(String),
     #[error("xcstrings path is required when no default file has been configured")]
     PathRequired,
 }
@@ -497,6 +499,29 @@ impl XcStringsStore {
         Ok(())
     }
 
+    pub async fn rename_key(&self, old_key: &str, new_key: &str) -> Result<(), StoreError> {
+        if old_key == new_key {
+            return Ok(());
+        }
+
+        let mut doc = self.data.write().await;
+        if doc.strings.contains_key(new_key) {
+            return Err(StoreError::KeyExists(new_key.to_string()));
+        }
+
+        let entry = doc
+            .strings
+            .remove(old_key)
+            .ok_or_else(|| StoreError::KeyMissing(old_key.to_string()))?;
+
+        doc.strings.insert(new_key.to_string(), entry);
+
+        let serialized = serde_json::to_string_pretty(&*doc)?;
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
+    }
+
     pub async fn set_comment(&self, key: &str, comment: Option<String>) -> Result<(), StoreError> {
         let mut doc = self.data.write().await;
         let entry = doc
@@ -629,6 +654,54 @@ mod tests {
 
         let err = store.delete_key("farewell").await.unwrap_err();
         assert!(matches!(err, StoreError::KeyMissing(_)));
+    }
+
+    #[tokio::test]
+    async fn rename_key_moves_entry() {
+        let tmp = TempStorePath::new("rename_key");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .upsert_translation(
+                "old.key",
+                "en",
+                TranslationUpdate::from_value_state(Some("Original".into()), None),
+            )
+            .await
+            .expect("seed translation");
+
+        store
+            .rename_key("old.key", "new.key")
+            .await
+            .expect("rename");
+
+        let missing = store
+            .get_translation("old.key", "en")
+            .await
+            .expect("fetch old")
+            .is_none();
+        assert!(missing);
+
+        let renamed = store
+            .get_translation("new.key", "en")
+            .await
+            .expect("fetch new")
+            .expect("translation exists");
+        assert_eq!(renamed.value.as_deref(), Some("Original"));
+
+        store
+            .upsert_translation(
+                "other.key",
+                "en",
+                TranslationUpdate::from_value_state(Some("Conflict".into()), None),
+            )
+            .await
+            .expect("seed other");
+
+        let err = store.rename_key("new.key", "other.key").await.unwrap_err();
+        assert!(matches!(err, StoreError::KeyExists(conflict) if conflict == "other.key"));
     }
 
     #[tokio::test]

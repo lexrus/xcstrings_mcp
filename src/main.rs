@@ -116,8 +116,8 @@ impl Config {
             candidate.map(PathBuf::from)
         };
 
-        let host = env_var("WEB_HOST", "XCSTRINGS_WEB_HOST")
-            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        let host =
+            env_var("WEB_HOST", "XCSTRINGS_WEB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
         let port = if let Ok(port) = env_var("WEB_PORT", "XCSTRINGS_WEB_PORT") {
             port
         } else {

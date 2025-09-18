@@ -211,6 +211,7 @@ impl From<StoreError> for ApiError {
             StoreError::SerdeFailed(_) | StoreError::ReadFailed(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
+            StoreError::PathRequired => StatusCode::BAD_REQUEST,
         };
         ApiError {
             status,

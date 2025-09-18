@@ -14,18 +14,19 @@ use serde_json;
 
 use crate::store::{
     StoreError, TranslationRecord, TranslationUpdate, TranslationValue, XcStringsStore,
+    XcStringsStoreManager,
 };
 
 #[derive(Clone)]
 pub struct XcStringsMcpServer {
-    store: Arc<XcStringsStore>,
+    stores: Arc<XcStringsStoreManager>,
     tool_router: ToolRouter<Self>,
 }
 
 impl XcStringsMcpServer {
-    pub fn new(store: Arc<XcStringsStore>) -> Self {
+    pub fn new(stores: Arc<XcStringsStoreManager>) -> Self {
         Self {
-            store,
+            stores,
             tool_router: Self::tool_router(),
         }
     }
@@ -43,25 +44,39 @@ impl XcStringsMcpServer {
             StoreError::KeyMissing(key) => {
                 McpError::resource_not_found(format!("Key '{key}' not found"), None)
             }
+            StoreError::PathRequired => McpError::invalid_params(
+                "xcstrings path must be provided via tool arguments".to_string(),
+                None,
+            ),
             other => McpError::internal_error(other.to_string(), None),
         }
+    }
+
+    async fn store_for(&self, path: Option<&str>) -> Result<Arc<XcStringsStore>, McpError> {
+        self.stores
+            .store_for(path)
+            .await
+            .map_err(Self::error_to_mcp)
     }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ListTranslationsParams {
+    pub path: String,
     /// Optional case-insensitive search query
     pub query: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct GetTranslationParams {
+    pub path: String,
     pub key: String,
     pub language: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct UpsertTranslationParams {
+    pub path: String,
     pub key: String,
     pub language: String,
     #[serde(default)]
@@ -130,19 +145,27 @@ impl UpsertTranslationParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct DeleteTranslationParams {
+    pub path: String,
     pub key: String,
     pub language: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct DeleteKeyParams {
+    pub path: String,
     pub key: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SetCommentParams {
+    pub path: String,
     pub key: String,
     pub comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ListLanguagesParams {
+    pub path: String,
 }
 
 fn to_json_text<T: serde::Serialize>(value: &T) -> String {
@@ -181,7 +204,8 @@ impl XcStringsMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
         let query = params.query.as_deref();
-        let records = self.store.list_records(query).await;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let records = store.list_records(query).await;
         Ok(render_translation_records(records))
     }
 
@@ -191,8 +215,8 @@ impl XcStringsMcpServer {
         params: Parameters<GetTranslationParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
-        let value = self
-            .store
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let value = store
             .get_translation(&params.key, &params.language)
             .await
             .map_err(Self::error_to_mcp)?;
@@ -205,11 +229,12 @@ impl XcStringsMcpServer {
         params: Parameters<UpsertTranslationParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
+        let path = params.path.clone();
         let key = params.key.clone();
         let language = params.language.clone();
         let update = params.into_update();
-        let updated = self
-            .store
+        let store = self.store_for(Some(path.as_str())).await?;
+        let updated = store
             .upsert_translation(&key, &language, update)
             .await
             .map_err(Self::error_to_mcp)?;
@@ -222,7 +247,8 @@ impl XcStringsMcpServer {
         params: Parameters<DeleteTranslationParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
-        self.store
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
             .delete_translation(&params.key, &params.language)
             .await
             .map_err(Self::error_to_mcp)?;
@@ -235,7 +261,8 @@ impl XcStringsMcpServer {
         params: Parameters<DeleteKeyParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
-        self.store
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
             .delete_key(&params.key)
             .await
             .map_err(Self::error_to_mcp)?;
@@ -248,7 +275,8 @@ impl XcStringsMcpServer {
         params: Parameters<SetCommentParams>,
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
-        self.store
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
             .set_comment(&params.key, params.comment.clone())
             .await
             .map_err(Self::error_to_mcp)?;
@@ -256,8 +284,13 @@ impl XcStringsMcpServer {
     }
 
     #[tool(description = "List all languages present in the xcstrings file")]
-    async fn list_languages(&self) -> Result<CallToolResult, McpError> {
-        let languages = self.store.list_languages().await;
+    async fn list_languages(
+        &self,
+        params: Parameters<ListLanguagesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let languages = store.list_languages().await;
         Ok(render_languages(languages))
     }
 }
@@ -283,11 +316,14 @@ impl rmcp::ServerHandler for XcStringsMcpServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{TranslationUpdate, XcStringsStore};
+    use crate::store::{TranslationUpdate, XcStringsStoreManager};
     use std::{
         collections::BTreeMap,
         path::PathBuf,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -322,11 +358,16 @@ mod tests {
     #[tokio::test]
     async fn list_translations_tool_returns_records() {
         let path = fresh_store_path("list_translations");
-        let store = Arc::new(
-            XcStringsStore::load_or_create(&path)
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
                 .await
-                .expect("load store"),
+                .expect("create manager"),
         );
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
         store
             .upsert_translation(
                 "greeting",
@@ -335,10 +376,13 @@ mod tests {
             )
             .await
             .expect("save translation");
-        let server = XcStringsMcpServer::new(store);
+        let server = XcStringsMcpServer::new(manager.clone());
 
         let result = server
-            .list_translations(Parameters(ListTranslationsParams { query: None }))
+            .list_translations(Parameters(ListTranslationsParams {
+                path: path_str.clone(),
+                query: None,
+            }))
             .await
             .expect("tool success");
 
@@ -355,11 +399,16 @@ mod tests {
     #[tokio::test]
     async fn list_languages_tool_reports_unique_entries() {
         let path = fresh_store_path("list_languages");
-        let store = Arc::new(
-            XcStringsStore::load_or_create(&path)
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
                 .await
-                .expect("load store"),
+                .expect("create manager"),
         );
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
         store
             .upsert_translation(
                 "greeting",
@@ -376,9 +425,14 @@ mod tests {
             )
             .await
             .expect("save translation");
-        let server = XcStringsMcpServer::new(store);
+        let server = XcStringsMcpServer::new(manager.clone());
 
-        let result = server.list_languages().await.expect("tool success");
+        let result = server
+            .list_languages(Parameters(ListLanguagesParams {
+                path: path_str.clone(),
+            }))
+            .await
+            .expect("tool success");
         let payload = parse_json(&result);
         let languages = payload
             .get("languages")
@@ -392,12 +446,17 @@ mod tests {
     #[tokio::test]
     async fn upsert_translation_tool_supports_plural_variations() {
         let path = fresh_store_path("upsert_plural");
-        let store = Arc::new(
-            XcStringsStore::load_or_create(&path)
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
                 .await
-                .expect("load store"),
+                .expect("create manager"),
         );
-        let server = XcStringsMcpServer::new(store.clone());
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+        let server = XcStringsMcpServer::new(manager.clone());
 
         let mut plural_cases = BTreeMap::new();
         plural_cases.insert(
@@ -422,6 +481,7 @@ mod tests {
 
         server
             .upsert_translation(Parameters(UpsertTranslationParams {
+                path: path_str.clone(),
                 key: "items".into(),
                 language: "en".into(),
                 value: None,

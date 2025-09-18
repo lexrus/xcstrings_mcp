@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -19,6 +19,8 @@ pub enum StoreError {
     TranslationMissing { key: String, language: String },
     #[error("string key '{0}' not found")]
     KeyMissing(String),
+    #[error("xcstrings path is required when no default file has been configured")]
+    PathRequired,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -240,6 +242,52 @@ pub struct XcStringsStore {
     data: Arc<RwLock<XcStringsFile>>,
 }
 
+#[derive(Clone)]
+pub struct XcStringsStoreManager {
+    default_path: Option<PathBuf>,
+    stores: Arc<RwLock<HashMap<PathBuf, Arc<XcStringsStore>>>>,
+}
+
+impl XcStringsStoreManager {
+    pub async fn new(default_path: Option<PathBuf>) -> Result<Self, StoreError> {
+        let manager = Self {
+            default_path,
+            stores: Arc::new(RwLock::new(HashMap::new())),
+        };
+
+        if manager.default_path.is_some() {
+            manager.store_for(None).await?;
+        }
+
+        Ok(manager)
+    }
+
+    pub async fn store_for(&self, path: Option<&str>) -> Result<Arc<XcStringsStore>, StoreError> {
+        let resolved_path = match path {
+            Some(raw) => PathBuf::from(raw),
+            None => self.default_path.clone().ok_or(StoreError::PathRequired)?,
+        };
+
+        {
+            let stores = self.stores.read().await;
+            if let Some(store) = stores.get(&resolved_path) {
+                return Ok(store.clone());
+            }
+        }
+
+        let store = Arc::new(XcStringsStore::load_or_create(&resolved_path).await?);
+        let mut stores = self.stores.write().await;
+        let entry = stores
+            .entry(resolved_path.clone())
+            .or_insert_with(|| store.clone());
+        Ok(entry.clone())
+    }
+
+    pub async fn default_store(&self) -> Result<Arc<XcStringsStore>, StoreError> {
+        self.store_for(None).await
+    }
+}
+
 impl XcStringsStore {
     pub async fn load_or_create(path: impl AsRef<Path>) -> Result<Self, StoreError> {
         let path = path.as_ref().to_path_buf();
@@ -430,7 +478,10 @@ mod tests {
     use super::*;
     use std::{
         path::PathBuf,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
         time::{SystemTime, UNIX_EPOCH},
     };
 
@@ -668,5 +719,34 @@ mod tests {
             plural.get("other").and_then(|entry| entry.value.as_deref()),
             Some("Many")
         );
+    }
+
+    #[tokio::test]
+    async fn manager_requires_path_without_default() {
+        let manager = XcStringsStoreManager::new(None)
+            .await
+            .expect("create manager");
+        let err = manager.store_for(None).await.err().expect("missing path");
+        assert!(matches!(err, StoreError::PathRequired));
+    }
+
+    #[tokio::test]
+    async fn manager_reuses_loaded_store_for_same_path() {
+        let tmp = TempStorePath::new("manager_reuse");
+        let manager = XcStringsStoreManager::new(None)
+            .await
+            .expect("create manager");
+        let path_str = tmp.file.to_str().unwrap().to_string();
+
+        let store_a = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("first load");
+        let store_b = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("second load");
+
+        assert!(Arc::ptr_eq(&store_a, &store_b));
     }
 }

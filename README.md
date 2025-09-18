@@ -16,33 +16,75 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 ```bash
 cargo run -- [path-to/Localizable.xcstrings] [port]
 ```
-- `path-to/Localizable.xcstrings`: Optional. Defaults to `./Localizable.xcstrings`.
+- `path-to/Localizable.xcstrings`: Optional. When omitted, the server runs in dynamic-path mode (web UI disabled) and every MCP call must supply a `path` argument.
 - `port`: Optional. Defaults to `8787`.
 
 You can also configure the server via environment variables:
 
 | Variable | Description | Default |
 | --- | --- | --- |
-| `XCSTRINGS_PATH` | Path to the `.xcstrings` file | `Localizable.xcstrings` |
+| `XCSTRINGS_PATH` | Path to the `.xcstrings` file | _unset_ (dynamic mode) |
 | `XCSTRINGS_WEB_HOST` | Host/interface for the web UI | `127.0.0.1` |
 | `XCSTRINGS_WEB_PORT` | Port for the web UI | `8787` |
 
 The web interface becomes available at `http://<host>:<port>/`.
 
 ### MCP usage
-Run the binary with stdio transport (default) and wire it into an MCP-enabled client. The following tools are exposed:
+Run the binary with stdio transport (default) and wire it into an MCP-enabled client. The following tools are exposed (each expects a `path` argument pointing to the target `.xcstrings` file):
 
-- `list_translations(query?)`
-- `get_translation(key, language)`
-- `upsert_translation(key, language, value?, state?, variations?)`
-- `delete_translation(key, language)`
-- `delete_key(key)`
-- `set_comment(key, comment?)`
-- `list_languages()`
+- `list_translations(path, query?)`
+- `get_translation(path, key, language)`
+- `upsert_translation(path, key, language, value?, state?, variations?)`
+- `delete_translation(path, key, language)`
+- `delete_key(path, key)`
+- `set_comment(path, key, comment?)`
+- `list_languages(path)`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
 
 The optional `variations` argument mirrors the `.xcstrings` schema. Provide an object that maps selectors (for example `"plural"`) to their cases, where each case includes the same shape as `upsert_translation` (value, state, nested variations). Missing selectors or cases are left untouched so you can patch individual plural entries without resending the entire localization.
+
+If the server starts without a default path (no CLI argument and no `XCSTRINGS_PATH`), the web UI remains disabled and every MCP call must provide `path`. Supplying a default path re-enables the web UI and becomes the fallback when `path` is omitted.
+
+### Integrating with AI tools
+Modern MCP-aware AI clients let you register external servers through a JSON manifest. As an example, the following snippet adds `xcstrings-mcp` to Claude Desktop — copy it into `~/Library/Application Support/Claude/claude_desktop_config.json` (creating the file if it does not exist) and adjust the command path to match your environment:
+
+```json
+{
+  "mcpServers": {
+    "xcstrings": {
+      "command": "/Users/you/.cargo/bin/xcstrings-mcp",
+      "transport": "stdio",
+      "env": {
+        "XCSTRINGS_WEB_HOST": "127.0.0.1",
+        "XCSTRINGS_WEB_PORT": "8787"
+      }
+    }
+  }
+}
+```
+
+Restart the client after saving so it loads the new MCP server definition. During tool calls, include a `path` field (for example `"path": "/Users/you/Projects/Localizable.xcstrings"`) so the server knows which localization file to open. Other tools that support the Model Context Protocol use a similar JSON representation—point the `command` to the built binary and pass any arguments or environment overrides you need.
+
+To run with a default localization file (enabling the embedded web UI and letting tools omit `path`), bake the location into the definition instead:
+
+```json
+{
+  "mcpServers": {
+    "xcstrings": {
+      "command": "/Users/you/.cargo/bin/xcstrings-mcp",
+      "args": ["--", "/Users/you/Projects/Localizable.xcstrings"],
+      "transport": "stdio",
+      "env": {
+        "XCSTRINGS_WEB_HOST": "127.0.0.1",
+        "XCSTRINGS_WEB_PORT": "8787"
+      }
+    }
+  }
+}
+```
+
+You can supply the path via `XCSTRINGS_PATH` instead of CLI arguments if you prefer. In either case, tool calls may omit `path` and the web UI will mount the default file.
 
 ## Development
 Install dependencies and run the full test suite:

@@ -18,6 +18,9 @@
         background: #f6f6f7;
         color: #1c1c1e;
       }
+      .hidden {
+        display: none !important;
+      }
       main {
         width: 100%;
         margin: 0;
@@ -66,6 +69,7 @@
       }
       .nav-left {
         flex: 1 1 16rem;
+        flex-wrap: wrap;
       }
       .nav-center {
         flex: 1 1 auto;
@@ -162,6 +166,12 @@
       button:active {
         background: #005fcc;
       }
+      button:disabled {
+        background: #d6d6db;
+        border-color: #d6d6db;
+        color: #8e8e93;
+        cursor: not-allowed;
+      }
       button.secondary {
         border-color: #c7c7cd;
         background: #f0f0f2;
@@ -186,10 +196,18 @@
         font-size: 0.9rem;
         line-height: 1.2;
       }
-      .language-select-wrapper {
+      .file-select-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        min-width: 12rem;
+      }
+      .language-select-wrapper,
+      .file-select-wrapper {
         position: relative;
       }
-      .language-select {
+      .language-select,
+      .file-select {
         appearance: none;
         background: #fff;
         color: #1c1c1e;
@@ -199,12 +217,25 @@
         min-width: 11rem;
         cursor: pointer;
       }
-      .language-select:focus {
+      .file-select {
+        min-width: 14rem;
+      }
+      .language-select:focus,
+      .file-select:focus {
         outline: none;
         border-color: #0a84ff;
         background: #fff;
       }
-      .language-select-wrapper::after {
+      select:disabled,
+      input:disabled,
+      textarea:disabled {
+        border-color: #e0e0e5;
+        background: #f4f4f5;
+        color: #8e8e93;
+        cursor: not-allowed;
+      }
+      .language-select-wrapper::after,
+      .file-select-wrapper::after {
         content: "\25BE";
         position: absolute;
         right: 0.9rem;
@@ -374,6 +405,12 @@
       .status.error {
         color: #ff3b30;
       }
+      .empty-placeholder {
+        margin-top: 5rem;
+        text-align: center;
+        color: #6e6e73;
+        font-size: 0.95rem;
+      }
       .plural-list {
         display: flex;
         flex-direction: column;
@@ -466,6 +503,9 @@
         .nav-right {
           justify-content: flex-end;
         }
+        .file-select-group {
+          width: 100%;
+        }
         table,
         thead,
         tbody,
@@ -498,7 +538,16 @@
   <body>
     <nav class="nav-bar">
       <div class="nav-left">
-        <h1 class="nav-title">Localizable.xcstrings</h1>
+        <div class="file-select-group">
+          <label class="nav-label" for="file-select">File</label>
+          <div class="file-select-wrapper">
+            <select
+              id="file-select"
+              class="language-select file-select"
+              title="Choose xcstrings file"
+            ></select>
+          </div>
+        </div>
         <input
           type="text"
           id="search"
@@ -534,8 +583,11 @@
       </div>
     </nav>
     <main>
+      <div id="empty-placeholder" class="empty-placeholder hidden">
+        No .xcstrings files found. Add one to the project and refresh.
+      </div>
       <div id="status" class="status"></div>
-      <table>
+      <table id="translations-table">
         <thead>
           <tr>
             <th>Key</th>
@@ -598,6 +650,8 @@
 
       const PLURAL_CASES = ["zero", "one", "two", "few", "many", "other"];
       const state = {
+        files: [],
+        currentPath: null,
         languages: [],
         currentLanguage: null,
         referenceLanguage: null,
@@ -771,21 +825,107 @@
 
         document.getElementById("language-header").textContent =
           translationHeaderText();
+
+        if (!state.languages.length) {
+          state.currentLanguage = null;
+          state.referenceLanguage = null;
+        }
+
+        updateControlState();
+      }
+
+      function updateControlState() {
+        const hasFiles = SAMPLE_MODE || state.files.length > 0;
+        const placeholder = document.getElementById("empty-placeholder");
+        const table = document.getElementById("translations-table");
+        const languageSelect = document.getElementById("language-select");
+        const referenceSelect = document.getElementById("reference-select");
+        const searchInput = document.getElementById("search");
+        const addButton = document.getElementById("add-translation");
+
+        placeholder.classList.toggle("hidden", hasFiles);
+        table.classList.toggle("hidden", !hasFiles);
+
+        languageSelect.disabled = !hasFiles || !state.languages.length;
+        referenceSelect.disabled = !hasFiles || !state.languages.length;
+        searchInput.disabled = !hasFiles && !SAMPLE_MODE;
+        addButton.disabled = !hasFiles || !state.currentLanguage;
+      }
+
+      function renderFileSelector() {
+        const select = document.getElementById("file-select");
+        select.innerHTML = "";
+
+        if (!state.files.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No xcstrings files";
+          select.appendChild(option);
+          select.disabled = true;
+          updateControlState();
+          return;
+        }
+
+        if (
+          state.currentPath &&
+          !state.files.some((file) => file.path === state.currentPath)
+        ) {
+          state.currentPath = state.files[0].path;
+        }
+
+        state.files.forEach((file) => {
+          const option = document.createElement("option");
+          option.value = file.path;
+          option.textContent = file.label || file.path;
+          if (file.path === state.currentPath) {
+            option.selected = true;
+          }
+          select.appendChild(option);
+        });
+
+        if (state.currentPath) {
+          select.value = state.currentPath;
+        }
+
+        select.disabled = SAMPLE_MODE && state.files.length === 1;
+
+        updateControlState();
       }
 
       async function fetchLanguages() {
+        if (!state.currentPath && !SAMPLE_MODE) {
+          state.languages = [];
+          renderLanguageControls();
+          return;
+        }
         if (SAMPLE_MODE) {
           state.languages = sampleStore.languages.slice();
           renderLanguageControls();
           return;
         }
-        const res = await fetch("/api/languages");
-        const data = await res.json();
-        state.languages = data.languages;
+        try {
+          const params = new URLSearchParams({ path: state.currentPath });
+          const res = await fetch(`/api/languages?${params.toString()}`);
+          if (!res.ok) {
+            throw new Error(`Request failed with status ${res.status}`);
+          }
+          const data = await res.json();
+          state.languages = data.languages || [];
+        } catch (error) {
+          console.error(error);
+          state.languages = [];
+          setStatus("Failed to load languages", true);
+        }
         renderLanguageControls();
       }
 
       async function fetchTranslations(query = "") {
+        if (!state.currentPath && !SAMPLE_MODE) {
+          state.items = [];
+          state.drafts = [];
+          renderTable();
+          return;
+        }
         if (SAMPLE_MODE) {
           const normalized = query.trim().toLowerCase();
           const filtered = !normalized
@@ -817,19 +957,26 @@
           state.items = filtered.map((item) =>
             JSON.parse(JSON.stringify(item)),
           );
-          state.drafts = state.drafts.filter((draft) => {
-            if (!draft.key) {
-              return true;
+        } else {
+          try {
+            const params = new URLSearchParams({ path: state.currentPath });
+            const trimmed = query.trim();
+            if (trimmed) {
+              params.set("q", trimmed);
             }
-            return !state.items.some((item) => item.key === draft.key);
-          });
-          renderTable();
-          return;
+            const res = await fetch(`/api/translations?${params.toString()}`);
+            if (!res.ok) {
+              throw new Error(`Request failed with status ${res.status}`);
+            }
+            const data = await res.json();
+            state.items = data.items || [];
+          } catch (error) {
+            console.error(error);
+            state.items = [];
+            setStatus("Failed to load translations", true);
+          }
         }
-        const params = query ? `?q=${encodeURIComponent(query)}` : "";
-        const res = await fetch(`/api/translations${params}`);
-        const data = await res.json();
-        state.items = data.items;
+
         state.drafts = state.drafts.filter((draft) => {
           if (!draft.key) {
             return true;
@@ -837,6 +984,69 @@
           return !state.items.some((item) => item.key === draft.key);
         });
         renderTable();
+      }
+
+      async function loadFiles() {
+        if (SAMPLE_MODE) {
+          state.files = [{ path: "sample", label: "Sample data" }];
+          state.currentPath = "sample";
+          state.drafts = [];
+          renderFileSelector();
+          await fetchLanguages();
+          await fetchTranslations(document.getElementById("search").value || "");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/files");
+          if (!res.ok) {
+            throw new Error(`Request failed with status ${res.status}`);
+          }
+          const data = await res.json();
+          state.files = Array.isArray(data.files) ? data.files : [];
+
+          if (state.files.length) {
+            const preserved =
+              state.currentPath &&
+              state.files.some((file) => file.path === state.currentPath)
+                ? state.currentPath
+                : null;
+            const defaultCandidate =
+              data.default &&
+              state.files.some((file) => file.path === data.default)
+                ? data.default
+                : null;
+            state.currentPath =
+              preserved || defaultCandidate || state.files[0].path;
+          } else {
+            state.currentPath = null;
+          }
+
+          state.drafts = [];
+          renderFileSelector();
+
+          if (state.currentPath) {
+            await fetchLanguages();
+            const query = document.getElementById("search").value || "";
+            await fetchTranslations(query);
+          } else {
+            state.languages = [];
+            state.items = [];
+            renderLanguageControls();
+            renderTable();
+          }
+        } catch (error) {
+          console.error(error);
+          setStatus("Failed to load xcstrings files", true);
+          state.files = [];
+          state.currentPath = null;
+          state.languages = [];
+          state.items = [];
+          state.drafts = [];
+          renderFileSelector();
+          renderLanguageControls();
+          renderTable();
+        }
       }
 
       function referenceFor(item) {
@@ -891,28 +1101,34 @@
               commentInput.value = item.comment || "";
               return;
             }
-            if (SAMPLE_MODE) {
-              const target = sampleStore.items.find(
-                (entry) => entry.key === activeKey,
-              );
-              if (!target) {
-                setStatus("Save the translation before adding comments", true);
-                commentInput.value = item.comment || "";
-                return;
-              }
-              target.comment = event.target.value || "";
-              item.comment = target.comment;
-              setStatus("Comment saved");
+          if (SAMPLE_MODE) {
+            const target = sampleStore.items.find(
+              (entry) => entry.key === activeKey,
+            );
+            if (!target) {
+              setStatus("Save the translation before adding comments", true);
+              commentInput.value = item.comment || "";
               return;
             }
-            const res = await fetch("/api/comments", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                key: activeKey,
-                comment: event.target.value || null,
-              }),
-            });
+            target.comment = event.target.value || "";
+            item.comment = target.comment;
+            setStatus("Comment saved");
+            return;
+          }
+          if (!state.currentPath) {
+            setStatus("Select a file before saving comments", true);
+            commentInput.value = item.comment || "";
+            return;
+          }
+          const res = await fetch("/api/comments", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              key: activeKey,
+              path: state.currentPath,
+              comment: event.target.value || null,
+            }),
+          });
             if (res.ok) {
               item.comment = event.target.value;
               setStatus("Comment saved");
@@ -1030,8 +1246,13 @@
               await fetchTranslations(document.getElementById("search").value);
               return;
             }
+            if (!state.currentPath) {
+              setStatus("Select a file before deleting keys", true);
+              return;
+            }
+            const deleteParams = new URLSearchParams({ path: state.currentPath });
             const res = await fetch(
-              `/api/keys/${encodeURIComponent(activeKey)}`,
+              `/api/keys/${encodeURIComponent(activeKey)}?${deleteParams.toString()}`,
               { method: "DELETE" },
             );
             if (res.ok) {
@@ -1351,6 +1572,10 @@
         }
 
         const body = { key, language };
+        if (!state.currentPath) {
+          throw new Error("Select a file before saving a translation");
+        }
+        body.path = state.currentPath;
         if (payload.value !== undefined) {
           body.value = payload.value;
         }
@@ -1399,10 +1624,13 @@
           target.key = newKey;
           return;
         }
+        if (!state.currentPath) {
+          throw new Error("Select a file before renaming keys");
+        }
         const res = await fetch(`/api/keys/${encodeURIComponent(oldKey)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ new_key: newKey }),
+          body: JSON.stringify({ new_key: newKey, path: state.currentPath }),
         });
         if (!res.ok) {
           let message = `Failed to rename key (${res.status})`;
@@ -1431,6 +1659,33 @@
       }
 
       document
+        .getElementById("file-select")
+        .addEventListener("change", async (event) => {
+          const nextPath = event.target.value || null;
+          if (SAMPLE_MODE) {
+            return;
+          }
+          if (!nextPath) {
+            state.currentPath = null;
+            state.languages = [];
+            state.items = [];
+            state.drafts = [];
+            renderLanguageControls();
+            renderTable();
+            updateControlState();
+            return;
+          }
+          if (state.currentPath === nextPath) {
+            return;
+          }
+          state.currentPath = nextPath;
+          state.drafts = [];
+          await fetchLanguages();
+          const query = document.getElementById("search").value || "";
+          await fetchTranslations(query);
+        });
+
+      document
         .getElementById("language-select")
         .addEventListener("change", (event) => {
           const next = event.target.value;
@@ -1454,12 +1709,14 @@
           renderTable();
         });
 
-      document.getElementById("refresh").addEventListener("click", () => {
-        const query = document.getElementById("search").value;
-        fetchTranslations(query);
+      document.getElementById("refresh").addEventListener("click", async () => {
+        await loadFiles();
       });
 
       document.getElementById("search").addEventListener("input", (event) => {
+        if (!state.currentPath && !SAMPLE_MODE) {
+          return;
+        }
         const query = event.target.value;
         fetchTranslations(query);
       });
@@ -1469,6 +1726,10 @@
         .addEventListener("click", () => {
           if (!state.currentLanguage) {
             setStatus("Select a language before adding translations", true);
+            return;
+          }
+          if (!state.currentPath && !SAMPLE_MODE) {
+            setStatus("Select a file before adding translations", true);
             return;
           }
           const draftId = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1492,8 +1753,7 @@
         });
 
       (async function init() {
-        await fetchLanguages();
-        await fetchTranslations();
+        await loadFiles();
       })();
     </script>
   </body>

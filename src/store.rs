@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
+    env, io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -7,7 +8,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use thiserror::Error;
-use tokio::{fs, sync::RwLock};
+use tokio::{fs, sync::RwLock, task};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -256,15 +257,35 @@ pub struct XcStringsStore {
 #[derive(Clone)]
 pub struct XcStringsStoreManager {
     default_path: Option<PathBuf>,
+    search_root: PathBuf,
     stores: Arc<RwLock<HashMap<PathBuf, Arc<XcStringsStore>>>>,
+    discovered_paths: Arc<RwLock<Vec<PathBuf>>>,
 }
 
 impl XcStringsStoreManager {
     pub async fn new(default_path: Option<PathBuf>) -> Result<Self, StoreError> {
+        let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let normalized_default = default_path.map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            }
+        });
+
+        let search_root = normalized_default
+            .as_ref()
+            .and_then(|path| path.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| cwd.clone());
+
         let manager = Self {
-            default_path,
+            default_path: normalized_default,
+            search_root,
             stores: Arc::new(RwLock::new(HashMap::new())),
+            discovered_paths: Arc::new(RwLock::new(Vec::new())),
         };
+
+        manager.refresh_discovered_paths().await?;
 
         if manager.default_path.is_some() {
             manager.store_for(None).await?;
@@ -273,11 +294,68 @@ impl XcStringsStoreManager {
         Ok(manager)
     }
 
+    fn resolve_path(&self, raw: &str) -> PathBuf {
+        let path = PathBuf::from(raw);
+        if path.is_absolute() {
+            path
+        } else {
+            self.search_root.join(path)
+        }
+    }
+
+    fn normalize_path(&self, path: PathBuf) -> PathBuf {
+        std::fs::canonicalize(&path).unwrap_or(path)
+    }
+
+    pub fn default_path(&self) -> Option<PathBuf> {
+        self.default_path.clone()
+    }
+
+    pub fn search_root(&self) -> &Path {
+        &self.search_root
+    }
+
+    pub async fn available_paths(&self) -> Vec<PathBuf> {
+        self.discovered_paths.read().await.clone()
+    }
+
+    pub async fn refresh_discovered_paths(&self) -> Result<Vec<PathBuf>, StoreError> {
+        let root = self.search_root.clone();
+        let default_path = self.default_path.clone();
+
+        let discovered = task::spawn_blocking(move || -> Result<Vec<PathBuf>, io::Error> {
+            let mut matches = discover_xcstrings(&root);
+
+            if let Some(default_path) = default_path {
+                let normalized = std::fs::canonicalize(&default_path).unwrap_or(default_path);
+                if !matches.iter().any(|existing| existing == &normalized) {
+                    matches.push(normalized);
+                }
+            }
+
+            matches.sort();
+            matches.dedup();
+            Ok(matches)
+        })
+        .await
+        .map_err(|err| {
+            StoreError::ReadFailed(io::Error::new(io::ErrorKind::Other, err.to_string()))
+        })??;
+
+        {
+            let mut guard = self.discovered_paths.write().await;
+            *guard = discovered.clone();
+        }
+
+        Ok(discovered)
+    }
+
     pub async fn store_for(&self, path: Option<&str>) -> Result<Arc<XcStringsStore>, StoreError> {
         let resolved_path = match path {
-            Some(raw) => PathBuf::from(raw),
+            Some(raw) => self.resolve_path(raw),
             None => self.default_path.clone().ok_or(StoreError::PathRequired)?,
         };
+        let resolved_path = self.normalize_path(resolved_path);
 
         {
             let stores = self.stores.read().await;
@@ -297,6 +375,52 @@ impl XcStringsStoreManager {
     pub async fn default_store(&self) -> Result<Arc<XcStringsStore>, StoreError> {
         self.store_for(None).await
     }
+}
+
+fn discover_xcstrings(root: &Path) -> Vec<PathBuf> {
+    if !root.exists() {
+        return Vec::new();
+    }
+
+    let mut results = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
+                    let lowered = name.to_ascii_lowercase();
+                    if lowered == "target" || lowered == ".git" || lowered == "node_modules" {
+                        continue;
+                    }
+                }
+                stack.push(path);
+            } else if file_type.is_file() {
+                let is_xcstrings = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("xcstrings"))
+                    .unwrap_or(false);
+                if is_xcstrings {
+                    let normalized = std::fs::canonicalize(&path).unwrap_or(path);
+                    results.push(normalized);
+                }
+            }
+        }
+    }
+
+    results
 }
 
 impl XcStringsStore {

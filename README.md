@@ -10,6 +10,7 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 - MCP toolset for listing, retrieving, creating, updating, and deleting translations (including plural variations) and comments.
 - Tool for enumerating all languages discovered in the file.
 - Embedded Axum web UI for browsing translations, filtering by query, editing values, plural variations, and managing comments.
+- Automatic discovery of `.xcstrings` files when no default path is provided, with a selector in the web UI so you can switch catalogs at runtime.
 - JSON-first responses from tools to make automation and debugging easier.
 
 ## Prerequisites
@@ -28,7 +29,7 @@ cargo install --path .
 # This will install `xcstrings-mcp` into `~/.cargo/bin/`
 ```
 
-- `path-to/Localizable.xcstrings`: Optional. When omitted, the server runs in dynamic-path mode (web UI disabled) and every MCP call must supply a `path` argument.
+- `path-to/Localizable.xcstrings`: Optional. When omitted, the server scans the workspace for `.xcstrings` files. The web UI stays available with a selector (showing a placeholder when none are found), while MCP tool calls must continue to supply a `path` argument.
 - `port`: Optional. Defaults to `8787`.
 
 You can also configure the server via environment variables:
@@ -59,7 +60,7 @@ Each tool returns JSON payloads encoded into text content for easier consumption
 
 The optional `variations` argument mirrors the `.xcstrings` schema. Provide an object that maps selectors (for example `"plural"`) to their cases, where each case includes the same shape as `upsert_translation` (value, state, nested variations). Missing selectors or cases are left untouched so you can patch individual plural entries without resending the entire localization.
 
-If the server starts without a default path (no CLI argument and no `STRINGS_PATH`), the web UI remains disabled and every MCP call must provide `path`. Supplying a default path re-enables the web UI and becomes the fallback when `path` is omitted.
+If the server starts without a default path (no CLI argument and no `STRINGS_PATH`), it scans the working tree for `.xcstrings` files and surfaces them through the web UI selector. When none are found, the UI shows a placeholder until a file appears. MCP tools still require an explicit `path` in this mode. Providing a default path pins the selector to that file and lets tool calls omit `path`.
 
 ### Integrating with AI tools
 

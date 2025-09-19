@@ -13,6 +13,7 @@ use tracing::info;
 
 use crate::store::{
     StoreError, TranslationRecord, TranslationUpdate, TranslationValue, XcStringsStore,
+    XcStringsStoreManager,
 };
 
 #[derive(Debug, Serialize)]
@@ -23,6 +24,8 @@ struct ErrorResponse {
 #[derive(Debug, Deserialize)]
 struct ListQuery {
     q: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,14 +34,34 @@ struct TranslationsResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct FileEntryResponse {
+    path: String,
+    label: String,
+}
+
+#[derive(Debug, Serialize)]
+struct FilesResponse {
+    files: Vec<FileEntryResponse>,
+    default: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct LanguagesResponse {
     languages: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct PathQuery {
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct UpsertRequest {
     key: String,
     language: String,
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     value: Option<Option<String>>,
     #[serde(default)]
@@ -107,16 +130,21 @@ impl UpsertRequest {
 struct CommentRequest {
     key: String,
     comment: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RenameKeyRequest {
     new_key: String,
+    #[serde(default)]
+    path: Option<String>,
 }
 
-pub fn router(store: Arc<XcStringsStore>) -> Router {
+pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
     Router::new()
         .route("/", get(index))
+        .route("/api/files", get(list_files))
         .route(
             "/api/translations",
             get(list_translations).put(upsert_translation),
@@ -128,43 +156,97 @@ pub fn router(store: Arc<XcStringsStore>) -> Router {
         .route("/api/keys/:key", delete(delete_key).put(rename_key))
         .route("/api/comments", post(update_comment))
         .route("/api/languages", get(list_languages))
-        .layer(Extension(store))
+        .layer(Extension(manager))
 }
 
-pub async fn serve(addr: SocketAddr, store: Arc<XcStringsStore>) -> anyhow::Result<()> {
-    let app = router(store);
+pub async fn serve(addr: SocketAddr, manager: Arc<XcStringsStoreManager>) -> anyhow::Result<()> {
+    let app = router(manager);
     info!(%addr, "Starting web UI");
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app.into_make_service()).await?;
     Ok(())
 }
 
+fn path_token(manager: &XcStringsStoreManager, path: &std::path::Path) -> String {
+    if let Ok(relative) = path.strip_prefix(manager.search_root()) {
+        let display = relative.to_string_lossy();
+        if !display.is_empty() {
+            return display.replace('\\', "/");
+        }
+    }
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn path_label(manager: &XcStringsStoreManager, path: &std::path::Path) -> String {
+    if let Ok(relative) = path.strip_prefix(manager.search_root()) {
+        let text = relative.to_string_lossy();
+        if !text.is_empty() {
+            return text.replace('\\', "/");
+        }
+    }
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
+}
+
+async fn resolve_store(
+    manager: &XcStringsStoreManager,
+    path: Option<&str>,
+) -> Result<Arc<XcStringsStore>, ApiError> {
+    manager.store_for(path).await.map_err(ApiError::from)
+}
+
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
 }
 
+async fn list_files(
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
+) -> Result<Json<FilesResponse>, ApiError> {
+    let paths = manager.refresh_discovered_paths().await?;
+    let files = paths
+        .iter()
+        .map(|path| FileEntryResponse {
+            path: path_token(manager.as_ref(), path),
+            label: path_label(manager.as_ref(), path),
+        })
+        .collect();
+    let default = manager
+        .default_path()
+        .as_ref()
+        .map(|path| path_token(manager.as_ref(), path));
+
+    Ok(Json(FilesResponse { files, default }))
+}
+
 async fn list_translations(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Query(query): Query<ListQuery>,
 ) -> Result<Json<TranslationsResponse>, ApiError> {
+    let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
     let items = store.list_records(query.q.as_deref()).await;
     Ok(Json(TranslationsResponse { items }))
 }
 
 async fn list_languages(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
+    Query(query): Query<PathQuery>,
 ) -> Result<Json<LanguagesResponse>, ApiError> {
+    let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
     let languages = store.list_languages().await;
     Ok(Json(LanguagesResponse { languages }))
 }
 
 async fn upsert_translation(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Json(payload): Json<UpsertRequest>,
 ) -> Result<Json<TranslationValue>, ApiError> {
+    let path = payload.path.clone();
     let key = payload.key.clone();
     let language = payload.language.clone();
     let update = payload.into_update();
+    let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
     let value = store
         .upsert_translation(&key, &language, update)
         .await
@@ -173,9 +255,11 @@ async fn upsert_translation(
 }
 
 async fn delete_translation(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Path((key, language)): Path<(String, String)>,
+    Query(query): Query<PathQuery>,
 ) -> Result<StatusCode, ApiError> {
+    let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
     store
         .delete_translation(&key, &language)
         .await
@@ -184,17 +268,21 @@ async fn delete_translation(
 }
 
 async fn delete_key(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Path(key): Path<String>,
+    Query(query): Query<PathQuery>,
 ) -> Result<StatusCode, ApiError> {
+    let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
     store.delete_key(&key).await.map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn update_comment(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Json(payload): Json<CommentRequest>,
 ) -> Result<StatusCode, ApiError> {
+    let path = payload.path.clone();
+    let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
     store
         .set_comment(&payload.key, payload.comment.clone())
         .await
@@ -203,7 +291,7 @@ async fn update_comment(
 }
 
 async fn rename_key(
-    Extension(store): Extension<Arc<XcStringsStore>>,
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
     Path(old_key): Path<String>,
     Json(payload): Json<RenameKeyRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -214,6 +302,9 @@ async fn rename_key(
             message: "New key must not be empty".to_string(),
         });
     }
+
+    let path = payload.path.clone();
+    let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
 
     store
         .rename_key(&old_key, new_key)

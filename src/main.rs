@@ -30,29 +30,27 @@ async fn main() -> anyhow::Result<()> {
             .map_err(|err| anyhow::anyhow!(err))?,
     );
 
-    let default_store = if config.path.is_some() {
-        Some(
-            stores
-                .default_store()
-                .await
-                .map_err(|err| anyhow::anyhow!(err))?,
-        )
-    } else {
-        None
-    };
-
-    if default_store.is_none() {
-        info!("Web UI disabled until a default xcstrings path is configured");
+    if config.path.is_none() {
+        let discovered = stores.available_paths().await;
+        if discovered.is_empty() {
+            info!("No xcstrings files discovered at startup");
+        } else {
+            info!(
+                count = discovered.len(),
+                "Discovered xcstrings files at startup"
+            );
+        }
     }
 
-    let web_handle = default_store.clone().map(|store| {
+    let web_handle = {
         let addr = config.web_addr;
+        let manager = stores.clone();
         tokio::spawn(async move {
-            if let Err(err) = web::serve(addr, store).await {
+            if let Err(err) = web::serve(addr, manager).await {
                 error!(?err, "Web server stopped");
             }
         })
-    });
+    };
 
     let mcp_handle = {
         let server = XcStringsMcpServer::new(stores.clone());
@@ -71,26 +69,15 @@ async fn main() -> anyhow::Result<()> {
         })
     };
 
-    if let Some(web_handle) = web_handle {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                warn!("Received Ctrl+C — shutting down");
-            }
-            _ = web_handle => {
-                warn!("Web server task exited");
-            }
-            _ = mcp_handle => {
-                warn!("MCP task exited");
-            }
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            warn!("Received Ctrl+C — shutting down");
         }
-    } else {
-        tokio::select! {
-            _ = signal::ctrl_c() => {
-                warn!("Received Ctrl+C — shutting down");
-            }
-            _ = mcp_handle => {
-                warn!("MCP task exited");
-            }
+        _ = web_handle => {
+            warn!("Web server task exited");
+        }
+        _ = mcp_handle => {
+            warn!("MCP task exited");
         }
     }
 

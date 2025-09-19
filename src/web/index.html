@@ -15,13 +15,13 @@
           -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
           Arial, sans-serif;
         margin: 0;
-        background: linear-gradient(180deg, #f8f8fc 0%, #f2f2f7 100%);
+        background: #f6f6f7;
         color: #1c1c1e;
       }
       main {
         width: 100%;
         margin: 0;
-        padding: 6.25rem 4vw 4rem;
+        padding: 4rem 3vw 2.5rem;
       }
       header {
         display: flex;
@@ -45,12 +45,17 @@
         align-items: center;
         justify-content: space-between;
         flex-wrap: wrap;
-        gap: 0.9rem;
-        padding: 0.75rem 4vw;
-        background: rgba(255, 255, 255, 0.96);
-        backdrop-filter: blur(16px);
-        border-bottom: 1px solid rgba(60, 60, 67, 0.08);
-        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+        gap: 0.6rem;
+        padding: 0.6rem 3vw;
+        background: #fff;
+        border-bottom: 1px solid #d6d6db;
+      }
+      .nav-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0;
+        margin-right: 1rem;
       }
       .nav-left,
       .nav-center,
@@ -83,14 +88,16 @@
       }
       input:not(.search-field),
       textarea {
-        font: inherit;
-        border-radius: 12px;
-        border: 1px solid transparent;
-        background: transparent;
-        padding: 0.5rem 0.75rem;
+        font-family:
+          "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+          "Courier New", monospace;
+        font-size: 0.9rem;
+        border-radius: 0;
+        border: 1px solid #c7c7cd;
+        background: #fff;
+        padding: 0.4rem 0.6rem;
         transition:
           border-color 0.2s ease,
-          box-shadow 0.2s ease,
           background 0.2s ease;
         color: inherit;
       }
@@ -102,96 +109,100 @@
       textarea:focus {
         outline: none;
         border-color: #0a84ff;
-        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.12);
-        background: #ffffff;
+        background: #fff;
+      }
+      input.comment-input {
+        font-size: 0.7rem;
+        color: #666;
+        border: 1px solid transparent;
+        background: transparent;
+        padding: 0.25rem 0.5rem;
+        width: 100%;
+        height: 1.6rem;
+      }
+      input.comment-input:hover {
+        border-color: #d1d1d6;
+        background: #fafafa;
+      }
+      input.comment-input:focus {
+        border-color: #0a84ff;
+        background: #fff;
+      }
+      input.comment-input::placeholder {
+        color: #c7c7cc;
       }
       .search-field {
         flex: 1 1 auto;
         font: inherit;
-        border-radius: 12px;
-        border: 1px solid rgba(60, 60, 67, 0.18);
-        background: rgba(255, 255, 255, 0.95);
-        padding: 0.5rem 0.75rem;
-        transition:
-          border-color 0.2s ease,
-          box-shadow 0.2s ease,
-          background 0.2s ease;
+        border-radius: 0;
+        border: 1px solid #c7c7cd;
+        background: #fff;
+        padding: 0.4rem 0.6rem;
+        transition: border-color 0.2s ease;
         color: inherit;
       }
       .search-field:focus {
         outline: none;
         border-color: #0a84ff;
-        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.12);
-        background: #ffffff;
+        background: #fff;
       }
       button {
         font: inherit;
-        border: none;
-        border-radius: 12px;
-        background: #0a84ff;
+        border: 1px solid #1c1c1e;
+        border-radius: 0;
+        background: #1c1c1e;
         color: #fff;
-        padding: 0.5rem 0.95rem;
+        padding: 0.4rem 0.85rem;
         cursor: pointer;
-        transition:
-          transform 0.15s ease,
-          box-shadow 0.2s ease,
-          background 0.2s ease;
+        transition: background 0.15s ease;
       }
       button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 8px 20px rgba(10, 132, 255, 0.25);
+        background: #0a84ff;
       }
       button:active {
-        transform: translateY(0);
-        box-shadow: none;
+        background: #005fcc;
       }
       button.secondary {
-        background: rgba(60, 60, 67, 0.08);
+        border-color: #c7c7cd;
+        background: #f0f0f2;
         color: #1c1c1e;
-        box-shadow: none;
       }
       button.secondary:hover {
-        background: rgba(60, 60, 67, 0.12);
-        box-shadow: none;
+        background: #e0e0e5;
       }
       button.refresh-button {
-        background: rgba(118, 118, 128, 0.12);
+        background: transparent;
         color: #1c1c1e;
         padding: 0.3rem 0.6rem;
-        border-radius: 999px;
-        box-shadow: none;
+        border-radius: 0;
+        border-color: #c7c7cd;
       }
       button.refresh-button:hover {
-        background: rgba(118, 118, 128, 0.2);
-        transform: none;
-        box-shadow: none;
+        background: #e6e6ea;
       }
       button.add-button {
-        padding: 0.35rem 0.8rem;
-        border-radius: 999px;
-        font-size: 1.1rem;
-        line-height: 1;
-        box-shadow: 0 8px 20px rgba(10, 132, 255, 0.25);
+        padding: 0.3rem 0.6rem;
+        border-radius: 0;
+        font-size: 0.9rem;
+        line-height: 1.2;
       }
       .language-select-wrapper {
         position: relative;
       }
       .language-select {
         appearance: none;
-        background: rgba(118, 118, 128, 0.12);
+        background: #fff;
         color: #1c1c1e;
-        padding: 0.45rem 2.4rem 0.45rem 0.75rem;
-        border-radius: 999px;
-        border: 1px solid transparent;
+        padding: 0.4rem 2rem 0.4rem 0.6rem;
+        border-radius: 0;
+        border: 1px solid #c7c7cd;
         min-width: 11rem;
-        box-shadow: none;
         cursor: pointer;
       }
       .language-select:focus {
         outline: none;
         border-color: #0a84ff;
-        box-shadow: 0 0 0 4px rgba(10, 132, 255, 0.12);
-        background: #ffffff;
+        background: #fff;
       }
       .language-select-wrapper::after {
         content: "\25BE";
@@ -199,7 +210,7 @@
         right: 0.9rem;
         top: 50%;
         transform: translateY(-50%);
-        color: rgba(60, 60, 67, 0.6);
+        color: #6e6e73;
         pointer-events: none;
         font-size: 0.8rem;
       }
@@ -217,28 +228,36 @@
       .translation-row:focus-within .key-tools {
         opacity: 1;
       }
+      .translation-row .key-tools .icon-button:nth-child(3) {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .translation-row:hover .key-tools .icon-button:nth-child(3),
+      .translation-row:focus-within .key-tools .icon-button:nth-child(3) {
+        opacity: 1;
+      }
       .lang-button {
-        background: rgba(118, 118, 128, 0.12);
+        background: #f0f0f2;
+        border: 1px solid #c7c7cd;
         color: #1c1c1e;
-        padding: 0.35rem 0.75rem;
-        border-radius: 999px;
-        font-size: 0.9rem;
-        box-shadow: none;
+        padding: 0.3rem 0.65rem;
+        border-radius: 0;
+        font-size: 0.85rem;
       }
       .lang-button:hover {
-        background: rgba(118, 118, 128, 0.18);
+        background: #e0e0e5;
       }
       .lang-button.active {
-        background: #0a84ff;
+        background: #1c1c1e;
         color: #fff;
-        box-shadow: 0 6px 16px rgba(10, 132, 255, 0.35);
       }
       .lang-button.subtle {
-        background: rgba(118, 118, 128, 0.08);
+        background: #f6f6f7;
         color: #3a3a3c;
+        border-color: #e0e0e5;
       }
       .lang-button.subtle.active {
-        background: #5856d6;
+        background: #4b4acf;
         color: #fff;
       }
       .language-row {
@@ -247,19 +266,16 @@
         flex-wrap: wrap;
       }
       table {
-        border-collapse: separate;
-        border-spacing: 0;
+        border-collapse: collapse;
         width: 100%;
-        margin-top: 1.8rem;
-        background: rgba(255, 255, 255, 0.96);
-        border-radius: 24px;
-        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
-        overflow: hidden;
+        margin-top: 1.5rem;
+        background: #fff;
+        border: 1px solid #d6d6db;
       }
       th,
       td {
-        padding: 1rem 1.25rem;
-        border-bottom: 1px solid rgba(60, 60, 67, 0.08);
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid #e0e0e5;
         vertical-align: top;
       }
       th {
@@ -268,81 +284,81 @@
         letter-spacing: 0.08em;
         text-transform: uppercase;
         color: #6e6e73;
-        background: rgba(249, 249, 251, 0.9);
+        background: #f6f6f7;
       }
       tr:last-child td {
         border-bottom: none;
       }
       .key-cell {
-        width: 22%;
-      }
-      .comment-cell {
-        width: 26%;
+        width: 30%;
       }
       .translation-cell {
         width: auto;
       }
+      .key-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
       .key-header {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
+        flex-direction: column;
+        gap: 0.3rem;
       }
       .key-input {
-        flex: 1;
+        width: 100%;
         font-size: 1rem;
         font-weight: 600;
         padding: 0.35rem 0.25rem;
+        height: 2.2rem;
       }
       .key-tools {
         display: flex;
-        gap: 0.35rem;
+        gap: 0.3rem;
+        position: relative;
       }
       .icon-button {
-        background: rgba(118, 118, 128, 0.16);
+        background: #f0f0f2;
+        border: 1px solid #c7c7cd;
         color: #1c1c1e;
-        padding: 0.25rem 0.55rem;
-        border-radius: 999px;
-        box-shadow: none;
-        min-width: 2rem;
-      }
-      .icon-button:hover {
-        background: rgba(118, 118, 128, 0.22);
-        transform: none;
-      }
-      .icon-button.danger {
-        background: rgba(255, 69, 58, 0.18);
-        color: #d70015;
-      }
-      .icon-button.danger:hover {
-        background: rgba(255, 69, 58, 0.28);
-      }
-      .icon-button.small {
         padding: 0.2rem 0.45rem;
+        border-radius: 0;
         min-width: unset;
         font-size: 0.85rem;
       }
-      .comment-input {
-        width: 100%;
-        min-height: 2.6rem;
+      .icon-button:hover {
+        background: #e0e0e5;
+      }
+      .icon-button.danger {
+        background: #fff4f3;
+        border-color: #ffb3ad;
+        color: #d70015;
+      }
+      .icon-button.danger:hover {
+        background: #ffd8d3;
       }
       .translation-wrapper {
         display: flex;
         flex-direction: column;
-        gap: 0.75rem;
+        gap: 0.4rem;
       }
       .translation-input {
-        min-height: 3.1rem;
+        min-height: 1.2rem;
         width: 100%;
+        overflow: hidden;
+        margin-bottom: 0.7rem;
       }
       .reference-line {
         display: flex;
         gap: 0.35rem;
-        align-items: baseline;
+        align-items: center;
         font-size: 0.8rem;
         color: #636366;
         flex-wrap: wrap;
-        margin-bottom: 0.4rem;
+        height: 1.6rem;
+        padding: 0 0.5rem;
+        background: #f9f9f9;
+        border-left: 2px solid #e0e0e5;
       }
       .reference-line .reference-value {
         color: #1c1c1e;
@@ -365,52 +381,77 @@
       }
       .plural-row {
         display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        margin-bottom: 0.75rem;
+      }
+      .plural-row label {
+        font-family:
+          "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+          "Courier New", monospace;
+        font-size: 0.8rem;
+        color: #636366;
+        padding: 0 0.5rem;
+        background: #f9f9f9;
+        border-left: 2px solid #e0e0e5;
+        height: 1.2rem;
+        display: flex;
+        align-items: center;
+      }
+      .plural-row-content {
+        display: flex;
         gap: 0.5rem;
         align-items: flex-start;
       }
-      .plural-row label {
-        min-width: 4rem;
-        font-weight: 600;
-        text-transform: capitalize;
-        padding-top: 0.35rem;
-      }
       .plural-row textarea {
         flex: 1;
+        resize: none;
+        overflow: hidden;
+        min-height: 2rem;
       }
-      .plural-actions {
-        margin-top: 0.25rem;
-        display: flex;
-        gap: 0.4rem;
-        align-items: center;
-      }
+
       .plural-picker {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        margin-top: 0.3rem;
+        background: #fff;
+        border: 1px solid #c7c7cd;
+        padding: 0.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        z-index: 10;
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
+        max-width: 300px;
       }
       .plural-picker.hidden {
         display: none;
       }
       .plural-option {
-        background: rgba(118, 118, 128, 0.12);
+        background: #f0f0f2;
+        border: 1px solid #c7c7cd;
         color: #1c1c1e;
-        padding: 0.35rem 0.65rem;
-        border-radius: 999px;
-        font-size: 0.82rem;
-        border: none;
+        padding: 0.3rem 0.6rem;
+        border-radius: 0;
+        font-size: 0.8rem;
         cursor: pointer;
         transition: background 0.2s ease;
       }
       .plural-option:hover {
-        background: rgba(118, 118, 128, 0.2);
+        background: #e0e0e5;
       }
       .plural-empty {
         font-style: italic;
         color: #636366;
       }
+      .plural-row .danger {
+        width: 32px;
+        height: 32px;
+      }
       @media (max-width: 900px) {
         main {
-          padding: 5.5rem 1.25rem 3rem;
+          padding: 4.5rem 1.25rem 2.5rem;
         }
         nav.nav-bar {
           padding: 0.6rem 1.25rem;
@@ -437,19 +478,19 @@
           display: none;
         }
         tr {
-          margin-bottom: 1.5rem;
-          border: 1px solid rgba(60, 60, 67, 0.1);
-          border-radius: 20px;
-          padding: 1rem;
+          margin-bottom: 1.25rem;
+          border: 1px solid #d6d6db;
+          border-radius: 0;
+          padding: 0.75rem;
           background: #fff;
-          box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
         }
         td {
           border: none;
           padding: 0.5rem 0;
         }
-        .key-header {
-          align-items: flex-start;
+        .key-wrapper {
+          flex-direction: column;
+          gap: 0.4rem;
         }
       }
     </style>
@@ -457,6 +498,7 @@
   <body>
     <nav class="nav-bar">
       <div class="nav-left">
+        <h1 class="nav-title">Localizable.xcstrings</h1>
         <input
           type="text"
           id="search"
@@ -464,7 +506,7 @@
           placeholder="Search keys or translations"
         />
         <button class="refresh-button" id="refresh" title="Refresh list">
-          ⟳
+          Refresh
         </button>
       </div>
       <div class="nav-center">
@@ -492,15 +534,11 @@
       </div>
     </nav>
     <main>
-      <header>
-        <h1>Localizable.xcstrings</h1>
-      </header>
       <div id="status" class="status"></div>
       <table>
         <thead>
           <tr>
             <th>Key</th>
-            <th>Comment</th>
             <th id="language-header">Translation</th>
           </tr>
         </thead>
@@ -567,38 +605,66 @@
         drafts: [],
       };
 
-      function toFlag(code) {
-        if (!code) {
-          return "🏳️";
-        }
-        const normalized = code.toLowerCase();
-        const region = LANGUAGE_REGIONS[normalized];
-        if (region) {
-          return regionToFlag(region);
-        }
-        const base = normalized.split(/[-_]/)[0];
-        if (LANGUAGE_REGIONS[base]) {
-          return regionToFlag(LANGUAGE_REGIONS[base]);
-        }
-        if (/^[a-z]{2}$/.test(base)) {
-          return regionToFlag(base);
-        }
-        return "🏳️";
-      }
-
-      function regionToFlag(region) {
-        if (!region) {
-          return "🏳️";
-        }
-        const upper = region.toUpperCase();
-        if (!/^[A-Z]{2}$/.test(upper)) {
-          return "🏳️";
-        }
-        const codePoints = upper
-          .split("")
-          .map((ch) => 127397 + ch.charCodeAt(0));
-        return String.fromCodePoint(...codePoints);
-      }
+      const SAMPLE_MODE = window.location.protocol === "file:";
+      const SAMPLE_DATA = {
+        languages: ["en", "fr", "de"],
+        items: [
+          {
+            key: "welcome_title",
+            comment: "Shown at the top of the dashboard",
+            translations: {
+              en: { value: "Welcome" },
+              fr: { value: "Bienvenue" },
+              de: { value: "Willkommen" },
+            },
+          },
+          {
+            key: "items_count",
+            comment: "Displays the current number of tracked items",
+            translations: {
+              en: {
+                value: "{count} item",
+                variations: {
+                  plural: {
+                    one: { value: "{count} item" },
+                    other: { value: "{count} items" },
+                  },
+                },
+              },
+              fr: {
+                value: "{count} objet",
+                variations: {
+                  plural: {
+                    one: { value: "{count} objet" },
+                    other: { value: "{count} objets" },
+                  },
+                },
+              },
+              de: {
+                value: "{count} Element",
+                variations: {
+                  plural: {
+                    one: { value: "{count} Element" },
+                    other: { value: "{count} Elemente" },
+                  },
+                },
+              },
+            },
+          },
+          {
+            key: "sync_status",
+            comment: "Banner shown while syncing with the localization service",
+            translations: {
+              en: { value: "Syncing latest content..." },
+              fr: { value: "Synchronisation du contenu..." },
+              de: { value: "Inhalte werden synchronisiert ..." },
+            },
+          },
+        ],
+      };
+      const sampleStore = SAMPLE_MODE
+        ? JSON.parse(JSON.stringify(SAMPLE_DATA))
+        : null;
 
       function languageLabel(code) {
         if (!code) {
@@ -615,11 +681,18 @@
         return code;
       }
 
+      function formatLanguageDisplay(code) {
+        if (!code) {
+          return "";
+        }
+        return `${languageLabel(code)}(${code})`;
+      }
+
       function translationHeaderText() {
         if (!state.currentLanguage) {
           return "Translation";
         }
-        return `Translation — ${toFlag(state.currentLanguage)} ${languageLabel(state.currentLanguage)}`;
+        return `Translation — ${formatLanguageDisplay(state.currentLanguage)}`;
       }
 
       function dropDraft(draftId) {
@@ -663,12 +736,12 @@
         state.languages.forEach((lang) => {
           const option = document.createElement("option");
           option.value = lang;
-          option.textContent = `${toFlag(lang)} ${languageLabel(lang)}`;
+          option.textContent = formatLanguageDisplay(lang);
           languageSelect.appendChild(option);
 
           const refOption = document.createElement("option");
           refOption.value = lang;
-          refOption.textContent = `${toFlag(lang)} ${languageLabel(lang)}`;
+          refOption.textContent = formatLanguageDisplay(lang);
           referenceSelect.appendChild(refOption);
         });
 
@@ -701,6 +774,11 @@
       }
 
       async function fetchLanguages() {
+        if (SAMPLE_MODE) {
+          state.languages = sampleStore.languages.slice();
+          renderLanguageControls();
+          return;
+        }
         const res = await fetch("/api/languages");
         const data = await res.json();
         state.languages = data.languages;
@@ -708,6 +786,46 @@
       }
 
       async function fetchTranslations(query = "") {
+        if (SAMPLE_MODE) {
+          const normalized = query.trim().toLowerCase();
+          const filtered = !normalized
+            ? sampleStore.items
+            : sampleStore.items.filter((item) => {
+                const bucket = [];
+                bucket.push(item.key || "");
+                if (item.comment) {
+                  bucket.push(item.comment);
+                }
+                sampleStore.languages.forEach((lang) => {
+                  const translation = item.translations?.[lang];
+                  if (!translation) {
+                    return;
+                  }
+                  if (translation.value) {
+                    bucket.push(translation.value);
+                  }
+                  const plural = translation.variations?.plural || {};
+                  Object.values(plural).forEach((entry) => {
+                    if (entry?.value) {
+                      bucket.push(entry.value);
+                    }
+                  });
+                });
+                return bucket.join(" ").toLowerCase().includes(normalized);
+              });
+
+          state.items = filtered.map((item) =>
+            JSON.parse(JSON.stringify(item)),
+          );
+          state.drafts = state.drafts.filter((draft) => {
+            if (!draft.key) {
+              return true;
+            }
+            return !state.items.some((item) => item.key === draft.key);
+          });
+          renderTable();
+          return;
+        }
         const params = query ? `?q=${encodeURIComponent(query)}` : "";
         const res = await fetch(`/api/translations${params}`);
         const data = await res.json();
@@ -728,6 +846,16 @@
         return item.translations[state.referenceLanguage] || null;
       }
 
+      function autoResizeTextarea(textarea) {
+        textarea.style.height = "auto";
+        textarea.style.height = textarea.scrollHeight + "px";
+      }
+
+      function initAutoResize(textarea) {
+        autoResizeTextarea(textarea);
+        textarea.addEventListener("input", () => autoResizeTextarea(textarea));
+      }
+
       function renderTable() {
         const tbody = document.getElementById("translations-body");
         tbody.innerHTML = "";
@@ -743,6 +871,57 @@
 
           const keyCell = document.createElement("td");
           keyCell.className = "key-cell";
+          const keyWrapper = document.createElement("div");
+          keyWrapper.className = "key-wrapper";
+
+          // Comment input first
+          const commentInput = document.createElement("input");
+          commentInput.type = "text";
+          commentInput.className = "comment-input";
+          commentInput.placeholder = "// comment";
+          commentInput.value = item.comment || "";
+          commentInput.addEventListener("change", async (event) => {
+            if (!activeKey) {
+              setStatus("Set a key before saving comments", true);
+              commentInput.value = "";
+              return;
+            }
+            if (isDraft) {
+              setStatus("Save the translation before adding comments", true);
+              commentInput.value = item.comment || "";
+              return;
+            }
+            if (SAMPLE_MODE) {
+              const target = sampleStore.items.find(
+                (entry) => entry.key === activeKey,
+              );
+              if (!target) {
+                setStatus("Save the translation before adding comments", true);
+                commentInput.value = item.comment || "";
+                return;
+              }
+              target.comment = event.target.value || "";
+              item.comment = target.comment;
+              setStatus("Comment saved");
+              return;
+            }
+            const res = await fetch("/api/comments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                key: activeKey,
+                comment: event.target.value || null,
+              }),
+            });
+            if (res.ok) {
+              item.comment = event.target.value;
+              setStatus("Comment saved");
+            } else {
+              setStatus("Failed to save comment", true);
+            }
+          });
+          keyWrapper.appendChild(commentInput);
+
           const keyHeader = document.createElement("div");
           keyHeader.className = "key-header";
 
@@ -838,6 +1017,19 @@
             if (!confirm(`Delete key "${activeKey}" for all languages?`)) {
               return;
             }
+            if (SAMPLE_MODE) {
+              const index = sampleStore.items.findIndex(
+                (entry) => entry.key === activeKey,
+              );
+              if (index === -1) {
+                setStatus("Failed to delete key", true);
+                return;
+              }
+              sampleStore.items.splice(index, 1);
+              setStatus("Key deleted");
+              await fetchTranslations(document.getElementById("search").value);
+              return;
+            }
             const res = await fetch(
               `/api/keys/${encodeURIComponent(activeKey)}`,
               { method: "DELETE" },
@@ -864,23 +1056,27 @@
 
           keyHeader.appendChild(keyInput);
           keyHeader.appendChild(keyTools);
-          keyCell.appendChild(keyHeader);
+
+          keyWrapper.appendChild(keyHeader);
+          keyCell.appendChild(keyWrapper);
           tr.appendChild(keyCell);
 
-          const commentCell = document.createElement("td");
-          commentCell.className = "comment-cell";
+          const translationCell = document.createElement("td");
+          translationCell.className = "translation-cell";
+          const translationWrapper = document.createElement("div");
+          translationWrapper.className = "translation-wrapper";
 
+          // Reference display
           const reference =
             !isDraft && state.referenceLanguage ? referenceFor(item) : null;
           if (reference) {
             const refLine = document.createElement("div");
             refLine.className = "reference-line";
 
-            const refFlag = document.createElement("span");
-            refFlag.textContent = toFlag(state.referenceLanguage);
-
             const refLabel = document.createElement("span");
-            refLabel.textContent = languageLabel(state.referenceLanguage);
+            refLabel.textContent = formatLanguageDisplay(
+              state.referenceLanguage,
+            );
 
             const separator = document.createElement("span");
             separator.textContent = "—";
@@ -889,51 +1085,12 @@
             refValue.className = "reference-value";
             refValue.textContent = reference.value ? reference.value : "—";
 
-            refLine.appendChild(refFlag);
             refLine.appendChild(refLabel);
             refLine.appendChild(separator);
             refLine.appendChild(refValue);
 
-            commentCell.appendChild(refLine);
+            translationWrapper.appendChild(refLine);
           }
-
-          const commentInput = document.createElement("textarea");
-          commentInput.className = "comment-input";
-          commentInput.placeholder = "Add a comment";
-          commentInput.value = item.comment || "";
-          commentInput.addEventListener("change", async (event) => {
-            if (!activeKey) {
-              setStatus("Set a key before saving comments", true);
-              commentInput.value = "";
-              return;
-            }
-            if (isDraft) {
-              setStatus("Save the translation before adding comments", true);
-              commentInput.value = item.comment || "";
-              return;
-            }
-            const res = await fetch("/api/comments", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                key: activeKey,
-                comment: event.target.value || null,
-              }),
-            });
-            if (res.ok) {
-              item.comment = event.target.value;
-              setStatus("Comment saved");
-            } else {
-              setStatus("Failed to save comment", true);
-            }
-          });
-          commentCell.appendChild(commentInput);
-          tr.appendChild(commentCell);
-
-          const translationCell = document.createElement("td");
-          translationCell.className = "translation-cell";
-          const translationWrapper = document.createElement("div");
-          translationWrapper.className = "translation-wrapper";
 
           if (
             state.currentLanguage &&
@@ -983,6 +1140,8 @@
           });
 
           translationWrapper.appendChild(textarea);
+          // Auto-resize main translation textarea
+          requestAnimationFrame(() => initAutoResize(textarea));
 
           const pluralVariations =
             (translation.variations && translation.variations.plural) || {};
@@ -991,21 +1150,17 @@
           const pluralList = document.createElement("div");
           pluralList.className = "plural-list";
 
-          if (pluralKeys.length === 0) {
-            const empty = document.createElement("div");
-            empty.className = "plural-empty";
-            empty.textContent = "No plural forms yet.";
-            pluralList.appendChild(empty);
-          }
-
           pluralKeys.forEach((caseKey) => {
             const entry = pluralVariations[caseKey] || {};
             const row = document.createElement("div");
             row.className = "plural-row";
 
             const label = document.createElement("label");
-            label.textContent = caseKey;
+            label.textContent = `plural: ${caseKey.toLowerCase()}`;
             row.appendChild(label);
+
+            const rowContent = document.createElement("div");
+            rowContent.className = "plural-row-content";
 
             const variantTextarea = document.createElement("textarea");
             variantTextarea.rows = 1;
@@ -1040,13 +1195,15 @@
                 variantTextarea.value = entry.value || "";
               }
             });
-            row.appendChild(variantTextarea);
+            rowContent.appendChild(variantTextarea);
+            // Auto-resize plural textarea
+            requestAnimationFrame(() => initAutoResize(variantTextarea));
 
             const deleteVariant = document.createElement("button");
             deleteVariant.type = "button";
-            deleteVariant.className = "icon-button small danger";
+            deleteVariant.className = "icon-button danger";
             deleteVariant.title = `Remove ${caseKey} plural`;
-            deleteVariant.textContent = "🗑️";
+            deleteVariant.textContent = "×";
             deleteVariant.addEventListener("click", async () => {
               if (!activeKey) {
                 setStatus("Set a key before removing plural forms", true);
@@ -1071,32 +1228,45 @@
                 setStatus(error.message, true);
               }
             });
-            row.appendChild(deleteVariant);
+            rowContent.appendChild(deleteVariant);
 
+            row.appendChild(rowContent);
             pluralList.appendChild(row);
           });
 
           translationWrapper.appendChild(pluralList);
 
-          const pluralActions = document.createElement("div");
-          pluralActions.className = "plural-actions";
-
-          const addBtn = document.createElement("button");
-          addBtn.type = "button";
-          addBtn.className = "secondary";
-          addBtn.textContent = "Add plural form";
-
-          const picker = document.createElement("div");
-          picker.className = "plural-picker hidden";
-
+          // Add plural button and picker to key tools
           const availableCases = PLURAL_CASES.filter(
             (caseKey) => !pluralKeys.includes(caseKey),
           );
 
-          if (availableCases.length === 0) {
-            addBtn.disabled = true;
-            addBtn.textContent = "All plural cases added";
-          } else {
+          if (availableCases.length > 0) {
+            const addPluralBtn = document.createElement("button");
+            addPluralBtn.type = "button";
+            addPluralBtn.className = "icon-button";
+            addPluralBtn.title = "Add plural form";
+            addPluralBtn.textContent = "＋ Plural";
+
+            const picker = document.createElement("div");
+            picker.className = "plural-picker hidden";
+
+            addPluralBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (!activeKey) {
+                setStatus("Set a key before adding plural forms", true);
+                return;
+              }
+              picker.classList.toggle("hidden");
+            });
+
+            // Close picker when clicking elsewhere
+            document.addEventListener("click", (e) => {
+              if (!keyTools.contains(e.target)) {
+                picker.classList.add("hidden");
+              }
+            });
+
             availableCases.forEach((caseKey) => {
               const optionBtn = document.createElement("button");
               optionBtn.type = "button";
@@ -1130,18 +1300,11 @@
               });
               picker.appendChild(optionBtn);
             });
+
+            keyTools.appendChild(addPluralBtn);
+            keyTools.appendChild(picker);
           }
 
-          addBtn.addEventListener("click", () => {
-            if (availableCases.length === 0) {
-              return;
-            }
-            picker.classList.toggle("hidden");
-          });
-
-          pluralActions.appendChild(addBtn);
-          pluralActions.appendChild(picker);
-          translationWrapper.appendChild(pluralActions);
           translationCell.appendChild(translationWrapper);
           tr.appendChild(translationCell);
 
@@ -1156,6 +1319,35 @@
         const { key, language } = payload;
         if (!language) {
           throw new Error("Select a language before saving");
+        }
+        if (SAMPLE_MODE) {
+          if (!key) {
+            throw new Error("Set a key before saving a translation");
+          }
+          let target = sampleStore.items.find((item) => item.key === key);
+          if (!target) {
+            target = { key, comment: "", translations: {} };
+            sampleStore.items.push(target);
+          }
+          const translation = target.translations[language] || {};
+          if (payload.value !== undefined) {
+            translation.value = payload.value;
+          }
+          if (payload.state !== undefined) {
+            translation.state = payload.state;
+          }
+          if (payload.variations !== undefined) {
+            translation.variations = translation.variations || {};
+            if (payload.variations.plural) {
+              translation.variations.plural = {
+                ...(translation.variations.plural || {}),
+                ...payload.variations.plural,
+              };
+            }
+          }
+          target.translations[language] = translation;
+          setStatus(successMessage);
+          return;
         }
 
         const body = { key, language };
@@ -1192,6 +1384,21 @@
       }
 
       async function renameKey(oldKey, newKey) {
+        if (SAMPLE_MODE) {
+          if (
+            sampleStore.items.some(
+              (item) => item.key === newKey && item.key !== oldKey,
+            )
+          ) {
+            throw new Error("A key with that name already exists");
+          }
+          const target = sampleStore.items.find((item) => item.key === oldKey);
+          if (!target) {
+            throw new Error("Key not found");
+          }
+          target.key = newKey;
+          return;
+        }
         const res = await fetch(`/api/keys/${encodeURIComponent(oldKey)}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },

@@ -1,38 +1,47 @@
-# Repository Guidelines
+# xcstrings-mcp — Agent Brief
 
-## Project Structure & Module Organization
+## Current Status
 
-- `src/` holds the Rust application: runtime wiring in `main.rs`, MCP handlers in `mcp_server.rs`, storage logic in `store.rs`, and the embedded web UI assets in `web/` (notably `index.html`).
-- `examples/` provides sample `.xcstrings` files that mirror real-world payloads for manual testing.
-- `README.md` documents runtime configuration, environment variables, and MCP integration steps; keep it aligned with code changes.
+- Rust MCP server exposes translation tooling and an Axum web UI for `.xcstrings` catalogs.
+- Supports dynamic-path mode (no default file) and default-path mode with live web editing.
+- Automatic discovery of catalogs when no path is provided; UI surfaces a selector and placeholders.
+- JSON schema from `schema/xcstrings.schema.json` enforced through the store and validation utilities.
 
-## Build, Test, and Development Commands
+## Key Components
 
-- `cargo build` — compile the project in debug mode; use `cargo build --release` for binaries you plan to ship to MCP clients.
-- `cargo run -- -- <path/to/Localizable.xcstrings>` — start the MCP server and bundled web UI against a specific strings file.
-- `cargo test` — execute all unit and integration tests; run after every non-trivial change.
-- `cargo fmt` — format Rust sources; run before committing to avoid CI churn.
+- `src/main.rs` wires CLI/env config (`STRINGS_PATH`, `WEB_HOST`, `WEB_PORT`), spawns MCP + web services, and handles shutdown.
+- `src/mcp_server.rs` implements tools: `list_translations`, `get_translation`, `upsert_translation`, `delete_translation`, `delete_key`, `set_comment`, `set_extraction_state`, `list_languages`.
+- `src/store.rs` manages async file access, caching with persistence on every change, variation/substitution updates, and catalog discovery.
+- `src/web/` hosts the embedded UI (`index.html`) with search, inline edits, plural management, and runtime catalog switching.
+- `examples/` contains sample catalogs for manual or automated validation; keep in sync with schema expectations.
 
-## Coding Style & Naming Conventions
+## Dev Workflow
 
-- Follow standard Rust style (`rustfmt` defaults). Prefer descriptive snake_case for modules, variables, and functions.
-- Keep web assets self-contained in `src/web/index.html`; use two-space indentation within HTML/JS to match existing layout.
-- When introducing new configuration, document the environment variable name and default in both `Config` and `README.md`.
+- `cargo build` / `cargo build --release` for debug or distribution binaries.
+- `cargo run -- -- <path/to/Localizable.xcstrings> [port]` to launch MCP + web; omit the path to run in discovery mode.
+- `cargo test` after non-trivial changes; add focused tests beside modified modules.
+- `cargo fmt --all` before committing to satisfy CI style checks.
+- `python3 validate_examples.py [path]` (if present) to confirm schema compliance when touching catalog logic.
 
-## Testing Guidelines
+## Style & Documentation
 
-- Rust tests live alongside modules in `src/` (see `store.rs` for examples). Name tests using descriptive snake_case (e.g., `plural_variations_round_trip`).
-- Ensure new storage or MCP behaviors have coverage in `store.rs` or `mcp_server.rs`; prefer temp-directory fixtures when touching filesystem logic.
-- For web changes, add companion Rust tests when behavior depends on API responses; manually validate UI flows locally via `cargo run`.
+- Follow Rust `snake_case` naming, default `rustfmt`, and keep HTML/JS in `src/web/index.html` with two-space indentation.
+- Document new configuration in both the `Config` implementation and `README.md` (env var name + default).
+- Keep README feature lists aligned with implemented behavior, especially around dynamic path handling and web UI capabilities.
 
-## Commit & Pull Request Guidelines
+## Testing Expectations
 
-- Write imperative, present-tense commit subjects (`Add plural picker delete control`). Group related changes per commit for easier review.
-- Pull requests should summarize the user-facing impact, list verification steps (tests, manual checks), and reference related issues or MCP manifests.
-- Include screenshots or screencasts when altering the web UI so reviewers can confirm styling without rebuilding locally.
+- Place Rust tests alongside code (see `store.rs` for patterns) with descriptive snake_case names.
+- Cover storage and MCP edge cases (plural variations, substitutions, comment handling, discovery) when modifying related code.
+- Manually exercise the web UI via `cargo run` for UX-impacting changes; add backend tests to reflect new UI interactions.
 
-## MCP Servers
+## Outstanding Focus Areas
 
-Skip the `resolve-library-id` request when possible since we can utilize these known *library ID*s for their corresponding scopes:
-`/rust-lang/rust` for Rust standard library and crates.io dependencies
-`docs.rs/rmcp/latest` for Rust MCP documentation
+- Investigate cache invalidation when files change outside the app (web UI still showing stale content).
+- Improve substitution layout (label/input on a single line) and reduce search box size for better ergonomics.
+- Allow resizing translation textareas to support longer entries.
+
+## MCP Docs Quick Links
+
+- Use `/rust-lang/rust` for Rust stdlib and crates.io documentation.
+- Use `docs.rs/rmcp/latest` for RMCP-specific APIs.

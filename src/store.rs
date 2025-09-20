@@ -6,7 +6,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Value};
+use serde_json::{self};
 use thiserror::Error;
 use tokio::{fs, sync::RwLock, task};
 
@@ -26,66 +26,102 @@ pub enum StoreError {
     PathRequired,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+const DEFAULT_VERSION: &str = "1.0";
+const DEFAULT_SOURCE_LANGUAGE: &str = "en";
+const DEFAULT_TRANSLATION_STATE: &str = "translated";
+
+fn default_version() -> String {
+    DEFAULT_VERSION.to_string()
+}
+
+fn default_source_language() -> String {
+    DEFAULT_SOURCE_LANGUAGE.to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FormatVersion {
+    String(String),
+    Integer(i64),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct XcStringsFile {
-    #[serde(rename = "sourceLanguage")]
-    pub source_language: Option<String>,
+    #[serde(rename = "version", default = "default_version")]
+    pub version: String,
+    #[serde(rename = "formatVersion", skip_serializing_if = "Option::is_none")]
+    pub format_version: Option<FormatVersion>,
+    #[serde(rename = "sourceLanguage", default = "default_source_language")]
+    pub source_language: String,
     #[serde(default)]
     pub strings: BTreeMap<String, XcStringEntry>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, Value>,
+}
+
+impl Default for XcStringsFile {
+    fn default() -> Self {
+        Self {
+            version: default_version(),
+            format_version: None,
+            source_language: default_source_language(),
+            strings: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct XcStringEntry {
-    #[serde(rename = "localizations", default)]
+    #[serde(
+        rename = "localizations",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub localizations: BTreeMap<String, XcLocalization>,
-    #[serde(rename = "extractionState", default)]
+    #[serde(rename = "extractionState", skip_serializing_if = "Option::is_none")]
     pub extraction_state: Option<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, Value>,
+    #[serde(rename = "shouldTranslate", skip_serializing_if = "Option::is_none")]
+    pub should_translate: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct XcLocalization {
-    #[serde(rename = "stringUnit", default)]
+    #[serde(rename = "stringUnit", skip_serializing_if = "Option::is_none")]
     pub string_unit: Option<XcStringUnit>,
-    #[serde(rename = "variations", default)]
+    #[serde(
+        rename = "variations",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub variations: BTreeMap<String, BTreeMap<String, XcLocalization>>, // nesting mirrors xcstrings schema
-    #[serde(rename = "substitutions", default)]
+    #[serde(
+        rename = "substitutions",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub substitutions: BTreeMap<String, XcSubstitution>,
-    #[serde(rename = "args", default)]
-    pub args: Option<Vec<Value>>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct XcSubstitution {
-    #[serde(rename = "stringUnit", default)]
+    #[serde(rename = "stringUnit", skip_serializing_if = "Option::is_none")]
     pub string_unit: Option<XcStringUnit>,
-    #[serde(rename = "variations", default)]
+    #[serde(
+        rename = "variations",
+        default,
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
     pub variations: BTreeMap<String, BTreeMap<String, XcLocalization>>,
-    #[serde(rename = "substitutions", default)]
-    pub substitutions: BTreeMap<String, XcSubstitution>,
-    #[serde(rename = "args", default)]
-    pub args: Option<Vec<Value>>,
-    #[serde(rename = "argNum", default)]
+    #[serde(rename = "argNum", skip_serializing_if = "Option::is_none")]
     pub arg_num: Option<i64>,
-    #[serde(rename = "formatSpecifier", default)]
+    #[serde(rename = "formatSpecifier", skip_serializing_if = "Option::is_none")]
     pub format_specifier: Option<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct XcStringUnit {
-    #[serde(default)]
     pub value: Option<String>,
-    #[serde(default)]
     pub state: Option<String>,
-    #[serde(flatten, default)]
-    pub extra: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -96,8 +132,6 @@ pub struct TranslationValue {
     pub variations: BTreeMap<String, BTreeMap<String, TranslationValue>>,
     #[serde(default)]
     pub substitutions: BTreeMap<String, SubstitutionValue>,
-    #[serde(default)]
-    pub args: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -108,8 +142,6 @@ pub struct TranslationUpdate {
     pub variations: Option<BTreeMap<String, BTreeMap<String, TranslationUpdate>>>,
     #[serde(default)]
     pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdate>>>,
-    #[serde(default)]
-    pub args: Option<Option<Vec<Value>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -122,10 +154,6 @@ pub struct SubstitutionValue {
     pub format_specifier: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub variations: BTreeMap<String, BTreeMap<String, TranslationValue>>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub substitutions: BTreeMap<String, SubstitutionValue>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub args: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -138,10 +166,6 @@ pub struct SubstitutionUpdate {
     pub format_specifier: Option<Option<String>>,
     #[serde(default)]
     pub variations: Option<BTreeMap<String, BTreeMap<String, TranslationUpdate>>>,
-    #[serde(default)]
-    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdate>>>,
-    #[serde(default)]
-    pub args: Option<Option<Vec<Value>>>,
 }
 
 impl TranslationValue {
@@ -172,19 +196,23 @@ impl TranslationValue {
             state,
             variations,
             substitutions,
-            args: loc.args.clone(),
         }
     }
 }
 
 impl TranslationUpdate {
     pub fn from_value_state(value: Option<String>, state: Option<String>) -> Self {
+        let normalized_state = if value.as_ref().map(|v| !v.is_empty()).unwrap_or(false) {
+            state.or_else(|| Some(DEFAULT_TRANSLATION_STATE.to_string()))
+        } else {
+            state
+        };
+
         Self {
             value: Some(value),
-            state: Some(state),
+            state: Some(normalized_state),
             variations: None,
             substitutions: None,
-            args: None,
         }
     }
 
@@ -228,11 +256,6 @@ impl SubstitutionValue {
                 (selector.clone(), converted)
             })
             .collect();
-        let substitutions = sub
-            .substitutions
-            .iter()
-            .map(|(name, nested)| (name.clone(), SubstitutionValue::from_substitution(nested)))
-            .collect();
 
         SubstitutionValue {
             value,
@@ -240,8 +263,6 @@ impl SubstitutionValue {
             arg_num: sub.arg_num,
             format_specifier: sub.format_specifier.clone(),
             variations,
-            substitutions,
-            args: sub.args.clone(),
         }
     }
 }
@@ -253,7 +274,6 @@ impl From<TranslationValue> for TranslationUpdate {
             state: Some(value.state),
             variations: None,
             substitutions: None,
-            args: Some(value.args),
         };
 
         if !value.variations.is_empty() {
@@ -292,8 +312,6 @@ impl From<SubstitutionValue> for SubstitutionUpdate {
             arg_num,
             format_specifier,
             variations,
-            substitutions,
-            args,
         } = value;
 
         let mut update = SubstitutionUpdate {
@@ -302,8 +320,6 @@ impl From<SubstitutionValue> for SubstitutionUpdate {
             arg_num: Some(arg_num),
             format_specifier: Some(format_specifier),
             variations: None,
-            substitutions: None,
-            args: Some(args),
         };
 
         if !variations.is_empty() {
@@ -320,20 +336,114 @@ impl From<SubstitutionValue> for SubstitutionUpdate {
             update.variations = Some(nested);
         }
 
-        if !substitutions.is_empty() {
-            let nested = substitutions
-                .into_iter()
-                .map(|(name, sub)| (name, Some(SubstitutionUpdate::from(sub))))
-                .collect();
-            update.substitutions = Some(nested);
-        }
-
         update
     }
 }
 
+fn is_blank(value: &Option<String>) -> bool {
+    value.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
+}
+
+fn sanitize_string_unit(unit: &mut XcStringUnit) {
+    if is_blank(&unit.value) {
+        unit.value = None;
+    }
+
+    if is_blank(&unit.state) {
+        unit.state = None;
+    }
+
+    if unit.value.is_some() && unit.state.is_none() {
+        unit.state = Some(DEFAULT_TRANSLATION_STATE.to_string());
+    }
+}
+
+fn string_unit_has_content(unit: &XcStringUnit) -> bool {
+    unit.value.is_some() && unit.state.is_some()
+}
+
+fn localization_is_empty(loc: &XcLocalization) -> bool {
+    loc.string_unit
+        .as_ref()
+        .map(|unit| !string_unit_has_content(unit))
+        .unwrap_or(true)
+        && loc.variations.is_empty()
+        && loc.substitutions.is_empty()
+}
+
+fn normalize_substitution(sub: &mut XcSubstitution) -> bool {
+    if let Some(unit) = sub.string_unit.as_mut() {
+        sanitize_string_unit(unit);
+    }
+
+    if sub
+        .string_unit
+        .as_ref()
+        .map(|unit| !string_unit_has_content(unit))
+        .unwrap_or(false)
+    {
+        sub.string_unit = None;
+    }
+
+    sub.variations.retain(|_, cases| {
+        cases.retain(|_, nested| !normalize_localization(nested));
+        !cases.is_empty()
+    });
+
+    substitution_is_empty(sub)
+}
+
+fn normalize_localization(loc: &mut XcLocalization) -> bool {
+    if let Some(unit) = loc.string_unit.as_mut() {
+        sanitize_string_unit(unit);
+    }
+
+    if loc
+        .string_unit
+        .as_ref()
+        .map(|unit| !string_unit_has_content(unit))
+        .unwrap_or(false)
+    {
+        loc.string_unit = None;
+    }
+
+    loc.variations.retain(|_, cases| {
+        cases.retain(|_, nested| !normalize_localization(nested));
+        !cases.is_empty()
+    });
+
+    loc.substitutions
+        .retain(|_, sub| !normalize_substitution(sub));
+
+    localization_is_empty(loc)
+}
+
+fn normalize_strings_file(doc: &mut XcStringsFile) {
+    if doc.version.trim().is_empty() {
+        doc.version = default_version();
+    }
+
+    if doc.source_language.trim().is_empty() {
+        doc.source_language = default_source_language();
+    }
+
+    doc.strings.retain(|_, entry| {
+        entry
+            .localizations
+            .retain(|_, loc| !normalize_localization(loc));
+
+        if entry.localizations.is_empty() {
+            entry.comment.is_some()
+                || entry.extraction_state.is_some()
+                || entry.should_translate.is_some()
+        } else {
+            true
+        }
+    });
+}
+
 fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
-    let mut unit = target.string_unit.clone().unwrap_or_default();
+    let mut unit = target.string_unit.take().unwrap_or_default();
 
     if let Some(value) = update.value {
         unit.value = value;
@@ -343,10 +453,10 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
         unit.state = state;
     }
 
-    if unit.value.is_some() || unit.state.is_some() || !unit.extra.is_empty() {
+    sanitize_string_unit(&mut unit);
+
+    if string_unit_has_content(&unit) {
         target.string_unit = Some(unit);
-    } else {
-        target.string_unit = None;
     }
 
     if let Some(variations) = update.variations {
@@ -361,10 +471,7 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
                     .unwrap_or_else(XcLocalization::default);
                 apply_update(&mut nested_loc, nested_update);
 
-                if nested_loc.string_unit.is_none()
-                    && nested_loc.variations.is_empty()
-                    && nested_loc.extra.is_empty()
-                {
+                if localization_is_empty(&nested_loc) {
                     continue;
                 }
 
@@ -376,8 +483,11 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
             }
         }
 
-        // re-add untouched selectors
-        target.variations.extend(existing_variations);
+        target.variations.extend(
+            existing_variations
+                .into_iter()
+                .filter(|(_, cases)| !cases.is_empty()),
+        );
     }
 
     if let Some(substitutions) = update.substitutions {
@@ -401,16 +511,16 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
             }
         }
 
-        target.substitutions.extend(existing_substitutions);
-    }
-
-    if let Some(args) = update.args {
-        target.args = args;
+        target.substitutions.extend(
+            existing_substitutions
+                .into_iter()
+                .filter(|(_, sub)| !substitution_is_empty(sub)),
+        );
     }
 }
 
 fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUpdate) {
-    let mut unit = target.string_unit.clone().unwrap_or_default();
+    let mut unit = target.string_unit.take().unwrap_or_default();
 
     if let Some(value) = update.value {
         unit.value = value;
@@ -420,10 +530,10 @@ fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUp
         unit.state = state;
     }
 
-    if unit.value.is_some() || unit.state.is_some() || !unit.extra.is_empty() {
+    sanitize_string_unit(&mut unit);
+
+    if string_unit_has_content(&unit) {
         target.string_unit = Some(unit);
-    } else {
-        target.string_unit = None;
     }
 
     if let Some(arg_num) = update.arg_num {
@@ -446,16 +556,7 @@ fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUp
                     .unwrap_or_else(XcLocalization::default);
                 apply_update(&mut nested_loc, nested_update);
 
-                if nested_loc.string_unit.is_none()
-                    && nested_loc.variations.is_empty()
-                    && nested_loc.substitutions.is_empty()
-                    && nested_loc
-                        .args
-                        .as_ref()
-                        .map(|value| value.is_empty())
-                        .unwrap_or(true)
-                    && nested_loc.extra.is_empty()
-                {
+                if localization_is_empty(&nested_loc) {
                     continue;
                 }
 
@@ -467,34 +568,11 @@ fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUp
             }
         }
 
-        target.variations.extend(existing_variations);
-    }
-
-    if let Some(substitutions) = update.substitutions {
-        let mut existing_substitutions = std::mem::take(&mut target.substitutions);
-
-        for (name, maybe_update) in substitutions {
-            match maybe_update {
-                Some(sub_update) => {
-                    let mut nested = existing_substitutions
-                        .remove(&name)
-                        .unwrap_or_else(XcSubstitution::default);
-                    apply_substitution_update(&mut nested, sub_update);
-                    if !substitution_is_empty(&nested) {
-                        target.substitutions.insert(name, nested);
-                    }
-                }
-                None => {
-                    existing_substitutions.remove(&name);
-                }
-            }
-        }
-
-        target.substitutions.extend(existing_substitutions);
-    }
-
-    if let Some(args) = update.args {
-        target.args = args;
+        target.variations.extend(
+            existing_variations
+                .into_iter()
+                .filter(|(_, cases)| !cases.is_empty()),
+        );
     }
 }
 
@@ -502,20 +580,13 @@ fn substitution_is_empty(sub: &XcSubstitution) -> bool {
     let string_unit_empty = sub
         .string_unit
         .as_ref()
-        .map(|unit| unit.value.is_none() && unit.state.is_none() && unit.extra.is_empty())
+        .map(|unit| !string_unit_has_content(unit))
         .unwrap_or(true);
 
     string_unit_empty
         && sub.variations.is_empty()
-        && sub.substitutions.is_empty()
-        && sub
-            .args
-            .as_ref()
-            .map(|value| value.is_empty())
-            .unwrap_or(true)
         && sub.arg_num.is_none()
         && sub.format_specifier.is_none()
-        && sub.extra.is_empty()
 }
 
 fn localization_contains(loc: &XcLocalization, query: &str) -> bool {
@@ -537,18 +608,6 @@ fn localization_contains(loc: &XcLocalization, query: &str) -> bool {
         .substitutions
         .values()
         .any(|sub| substitution_contains(sub, query))
-        || loc
-            .args
-            .as_ref()
-            .map(|args| {
-                args.iter().any(|value| {
-                    value
-                        .as_str()
-                        .map(|s| s.to_lowercase().contains(query))
-                        .unwrap_or_else(|| value.to_string().to_lowercase().contains(query))
-                })
-            })
-            .unwrap_or(false)
 }
 
 fn substitution_contains(sub: &XcSubstitution, query: &str) -> bool {
@@ -566,22 +625,7 @@ fn substitution_contains(sub: &XcSubstitution, query: &str) -> bool {
         cases
             .values()
             .any(|nested| localization_contains(nested, query))
-    }) || sub
-        .substitutions
-        .values()
-        .any(|nested| substitution_contains(nested, query))
-        || sub
-            .args
-            .as_ref()
-            .map(|args| {
-                args.iter().any(|value| {
-                    value
-                        .as_str()
-                        .map(|s| s.to_lowercase().contains(query))
-                        .unwrap_or_else(|| value.to_string().to_lowercase().contains(query))
-                })
-            })
-            .unwrap_or(false)
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -786,12 +830,14 @@ impl XcStringsStore {
             }
         }
 
-        let doc = if path.exists() {
+        let mut doc = if path.exists() {
             let raw = fs::read_to_string(&path).await?;
             serde_json::from_str(&raw)?
         } else {
             XcStringsFile::default()
         };
+
+        normalize_strings_file(&mut doc);
 
         Ok(Self {
             path,
@@ -805,7 +851,8 @@ impl XcStringsStore {
 
     pub async fn reload(&self) -> Result<(), StoreError> {
         let raw = fs::read_to_string(&self.path).await?;
-        let doc: XcStringsFile = serde_json::from_str(&raw)?;
+        let mut doc: XcStringsFile = serde_json::from_str(&raw)?;
+        normalize_strings_file(&mut doc);
         *self.data.write().await = doc;
         Ok(())
     }
@@ -813,9 +860,7 @@ impl XcStringsStore {
     pub async fn list_languages(&self) -> Vec<String> {
         let doc = self.data.read().await;
         let mut langs: BTreeSet<String> = BTreeSet::new();
-        if let Some(lang) = &doc.source_language {
-            langs.insert(lang.clone());
-        }
+        langs.insert(doc.source_language.clone());
         for entry in doc.strings.values() {
             langs.extend(entry.localizations.keys().cloned());
         }
@@ -845,14 +890,9 @@ impl XcStringsStore {
                     .map(|(lang, loc)| (lang.clone(), TranslationValue::from_localization(loc)))
                     .collect();
 
-                let comment = entry
-                    .extra
-                    .get("comment")
-                    .and_then(|value| value.as_str().map(|s| s.to_string()));
-
                 Some(TranslationRecord {
                     key: key.clone(),
-                    comment,
+                    comment: entry.comment.clone(),
                     extraction_state: entry.extraction_state.clone(),
                     translations,
                 })
@@ -877,11 +917,6 @@ impl XcStringsStore {
                     }
                 }
 
-                let comment = entry
-                    .extra
-                    .get("comment")
-                    .and_then(|value| value.as_str().map(|s| s.to_string()));
-
                 let languages = entry.localizations.keys().cloned().collect();
                 let has_variations = entry
                     .localizations
@@ -890,7 +925,7 @@ impl XcStringsStore {
 
                 Some(TranslationSummary {
                     key: key.clone(),
-                    comment,
+                    comment: entry.comment.clone(),
                     languages,
                     has_variations,
                 })
@@ -932,6 +967,7 @@ impl XcStringsStore {
 
         let updated = TranslationValue::from_localization(loc);
 
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -961,6 +997,7 @@ impl XcStringsStore {
             });
         }
 
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -972,6 +1009,7 @@ impl XcStringsStore {
         if doc.strings.remove(key).is_none() {
             return Err(StoreError::KeyMissing(key.to_string()));
         }
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -995,6 +1033,7 @@ impl XcStringsStore {
 
         doc.strings.insert(new_key.to_string(), entry);
 
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -1013,6 +1052,7 @@ impl XcStringsStore {
             .or_insert_with(XcStringEntry::default);
         entry.extraction_state = state;
 
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -1025,16 +1065,8 @@ impl XcStringsStore {
             .strings
             .entry(key.to_string())
             .or_insert_with(XcStringEntry::default);
-        match comment {
-            Some(value) => {
-                entry
-                    .extra
-                    .insert("comment".to_string(), Value::String(value));
-            }
-            None => {
-                entry.extra.remove("comment");
-            }
-        }
+        entry.comment = comment;
+        normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
         fs::write(&self.path, serialized).await?;
@@ -1209,6 +1241,15 @@ mod tests {
             .expect("load store");
 
         store
+            .upsert_translation(
+                "title",
+                "en",
+                TranslationUpdate::from_value_state(Some("Welcome".into()), None),
+            )
+            .await
+            .expect("seed translation");
+
+        store
             .set_comment("title", Some("Shown on welcome screen".into()))
             .await
             .expect("set comment");
@@ -1233,6 +1274,15 @@ mod tests {
         let store = XcStringsStore::load_or_create(&tmp.file)
             .await
             .expect("load store");
+
+        store
+            .upsert_translation(
+                "welcome",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hi".into()), None),
+            )
+            .await
+            .expect("seed translation for extraction state");
 
         store
             .set_extraction_state("welcome", Some("manual".into()))

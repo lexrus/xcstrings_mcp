@@ -98,8 +98,6 @@ struct UpsertTranslationParams {
     pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
     #[serde(default)]
     pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
-    #[serde(default)]
-    pub args: Option<Option<Vec<serde_json::Value>>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Clone)]
@@ -112,8 +110,6 @@ struct VariationUpdateParam {
     pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
     #[serde(default)]
     pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
-    #[serde(default)]
-    pub args: Option<Option<Vec<serde_json::Value>>>,
 }
 
 impl VariationUpdateParam {
@@ -143,9 +139,6 @@ impl VariationUpdateParam {
                     .collect(),
             );
         }
-        if let Some(args) = self.args {
-            update.args = Some(args);
-        }
         update
     }
 }
@@ -162,10 +155,6 @@ struct SubstitutionUpdateParam {
     pub format_specifier: Option<Option<String>>,
     #[serde(default)]
     pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
-    #[serde(default)]
-    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
-    #[serde(default)]
-    pub args: Option<Option<Vec<serde_json::Value>>>,
 }
 
 impl SubstitutionUpdateParam {
@@ -188,17 +177,6 @@ impl SubstitutionUpdateParam {
                     })
                     .collect(),
             );
-        }
-        if let Some(substitutions) = self.substitutions {
-            update.substitutions = Some(
-                substitutions
-                    .into_iter()
-                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
-                    .collect(),
-            );
-        }
-        if let Some(args) = self.args {
-            update.args = Some(args);
         }
         update
     }
@@ -230,9 +208,6 @@ impl UpsertTranslationParams {
                     .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
                     .collect(),
             );
-        }
-        if let Some(args) = self.args {
-            update.args = Some(args);
         }
         update
     }
@@ -687,7 +662,6 @@ mod tests {
                 state: None,
                 variations: None,
                 substitutions: None,
-                args: None,
             },
         );
         plural_cases.insert(
@@ -697,7 +671,6 @@ mod tests {
                 state: None,
                 variations: None,
                 substitutions: None,
-                args: None,
             },
         );
 
@@ -713,7 +686,6 @@ mod tests {
                 state: None,
                 variations: Some(variations),
                 substitutions: None,
-                args: None,
             }))
             .await
             .expect("tool success");
@@ -750,6 +722,20 @@ mod tests {
                 .expect("create manager"),
         );
         let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("seed store");
+
+        store
+            .upsert_translation(
+                "message",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("seed translation");
 
         server
             .set_extraction_state(Parameters(SetExtractionStateParams {

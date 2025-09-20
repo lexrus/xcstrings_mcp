@@ -11,10 +11,11 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 - Tool for enumerating all languages discovered in the file.
 - Embedded Axum web UI for browsing translations, filtering by query, editing values, plural variations, and managing comments.
 - Automatic discovery of `.xcstrings` files when no default path is provided, with a selector in the web UI so you can switch catalogs at runtime.
-- Inline editing for extraction state, translation state, substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases), plus the `args` metadata array — all consistently exposed via the web UI and MCP tools.
+- Inline editing for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases) — all consistently exposed via the web UI and MCP tools.
 
-The browser UI surfaces these controls alongside each key: toggle the extraction state, adjust per-language review state, manage substitution metadata, and view or edit the raw `args` payload without leaving the page.
+The browser UI surfaces these controls alongside each key: toggle the extraction state, adjust per-language review state, and manage substitution metadata without leaving the page.
 - JSON-first responses from tools to make automation and debugging easier.
+- Schema-backed validation using the vendored [`xcstrings.schema.json`](schema/xcstrings.schema.json) keeps generated catalogs consistent with Apple’s format.
 
 ## Prerequisites
 
@@ -65,10 +66,8 @@ Each tool returns JSON payloads encoded into text content for easier consumption
 When calling `upsert_translation`, you can send:
 
 - `variations` — map selectors (e.g. `"plural"`) to their cases; each case is another translation update.
-- `substitutions` — map substitution identifiers (`"arg1"`, `"device"`, etc.) to updates containing `value`, `state`, `argNum`, `formatSpecifier`, nested `variations`, or further `substitutions`.
-- `args` — the raw `args` array from Xcode’s schema. Provide either an array (replacing the existing data) or `null` to remove it.
-
-Missing selectors, substitutions, or args entries are left untouched so you can patch individual pieces without resending the entire localization payload.
+- `substitutions` — map substitution identifiers (`"arg1"`, `"device"`, etc.) to updates containing `value`, `state`, `argNum`, `formatSpecifier`, and nested `variations`.
+Missing selectors or substitutions are left untouched so you can patch individual pieces without resending the entire localization payload.
 
 If the server starts without a default path (no CLI argument and no `STRINGS_PATH`), it scans the working tree for `.xcstrings` files and surfaces them through the web UI selector. When none are found, the UI shows a placeholder until a file appears. MCP tools still require an explicit `path` in this mode. Providing a default path pins the selector to that file and lets tool calls omit `path`.
 
@@ -125,6 +124,8 @@ cargo test
 ```
 
 `cargo fmt --all` is recommended before submitting changes.
+
+The repository vendors the official schema as a git submodule under `schema/`. Use `git submodule update --init --remote` to pull the latest definition when updating validation logic.
 
 ## Project layout
 

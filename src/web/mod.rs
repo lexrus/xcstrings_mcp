@@ -8,7 +8,6 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -71,8 +70,6 @@ struct UpsertRequest {
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
     #[serde(default)]
     substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
-    #[serde(default)]
-    args: Option<Option<Vec<Value>>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -85,8 +82,6 @@ struct VariationUpdatePayload {
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
     #[serde(default)]
     substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
-    #[serde(default)]
-    args: Option<Option<Vec<Value>>>,
 }
 
 impl VariationUpdatePayload {
@@ -116,9 +111,6 @@ impl VariationUpdatePayload {
                     .collect(),
             );
         }
-        if let Some(args) = self.args {
-            update.args = Some(args);
-        }
         update
     }
 }
@@ -135,10 +127,6 @@ struct SubstitutionUpdatePayload {
     format_specifier: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
-    #[serde(default)]
-    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
-    #[serde(default)]
-    args: Option<Option<Vec<Value>>>,
 }
 
 impl SubstitutionUpdatePayload {
@@ -161,17 +149,6 @@ impl SubstitutionUpdatePayload {
                     })
                     .collect(),
             );
-        }
-        if let Some(substitutions) = self.substitutions {
-            update.substitutions = Some(
-                substitutions
-                    .into_iter()
-                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
-                    .collect(),
-            );
-        }
-        if let Some(args) = self.args {
-            update.args = Some(args);
         }
         update
     }
@@ -203,9 +180,6 @@ impl UpsertRequest {
                     .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
                     .collect(),
             );
-        }
-        if let Some(args) = self.args {
-            update.args = Some(args);
         }
         update
     }

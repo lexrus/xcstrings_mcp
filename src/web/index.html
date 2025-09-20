@@ -501,10 +501,10 @@
         display: flex;
         gap: 0.35rem;
         align-items: center;
-        font-size: 0.8rem;
+        font-size: 0.7rem;
         color: #636366;
-        flex-wrap: wrap;
-        height: 1.6rem;
+        flex-wrap: warp;
+        min-height: 1.6rem;
         padding: 0 0.5rem;
         background: #f9f9f9;
         border-left: 2px solid #e0e0e5;
@@ -1177,34 +1177,23 @@
           }
         }
 
-        if (Array.isArray(node.args)) {
-          if (node.args.length === 0) {
-            delete node.args;
-          }
-        } else if (node.args === null || node.args === undefined) {
-          delete node.args;
-        }
-
         const hasValue = node.value !== undefined;
         const hasState = node.state !== undefined;
         const hasVariations =
           node.variations && Object.keys(node.variations).length > 0;
         const hasSubstitutions =
           node.substitutions && Object.keys(node.substitutions).length > 0;
-        const hasArgs = Array.isArray(node.args) && node.args.length > 0;
 
-        return (
-          !hasValue &&
-          !hasState &&
-          !hasVariations &&
-          !hasSubstitutions &&
-          !hasArgs
-        );
+        return !hasValue && !hasState && !hasVariations && !hasSubstitutions;
       }
 
       function pruneSubstitutionInPlace(substitution) {
         if (!substitution || typeof substitution !== "object") {
           return true;
+        }
+
+        if (substitution.substitutions !== undefined) {
+          delete substitution.substitutions;
         }
 
         if (substitution.value === null || substitution.value === undefined) {
@@ -1254,30 +1243,6 @@
           }
         }
 
-        if (substitution.substitutions) {
-          Object.entries(substitution.substitutions).forEach(
-            ([name, nested]) => {
-              if (pruneSubstitutionInPlace(nested)) {
-                delete substitution.substitutions[name];
-              }
-            },
-          );
-          if (Object.keys(substitution.substitutions).length === 0) {
-            delete substitution.substitutions;
-          }
-        }
-
-        if (Array.isArray(substitution.args)) {
-          if (substitution.args.length === 0) {
-            delete substitution.args;
-          }
-        } else if (
-          substitution.args === null ||
-          substitution.args === undefined
-        ) {
-          delete substitution.args;
-        }
-
         const hasValue = substitution.value !== undefined;
         const hasState = substitution.state !== undefined;
         const hasArgNum = substitution.argNum !== undefined;
@@ -1285,20 +1250,13 @@
         const hasVariations =
           substitution.variations &&
           Object.keys(substitution.variations).length > 0;
-        const hasSubstitutions =
-          substitution.substitutions &&
-          Object.keys(substitution.substitutions).length > 0;
-        const hasArgs =
-          Array.isArray(substitution.args) && substitution.args.length > 0;
 
         return (
           !hasValue &&
           !hasState &&
           !hasArgNum &&
           !hasFormat &&
-          !hasVariations &&
-          !hasSubstitutions &&
-          !hasArgs
+          !hasVariations
         );
       }
 
@@ -2465,6 +2423,11 @@
 
       function mergeSubstitution(existing, patch) {
         const result = { ...existing };
+
+        if (result.substitutions !== undefined) {
+          delete result.substitutions;
+        }
+
         if (patch === null) {
           return null;
         }
@@ -2488,31 +2451,6 @@
               ...cases,
             };
           });
-        }
-        if (patch.substitutions !== undefined) {
-          result.substitutions = result.substitutions || {};
-          Object.entries(patch.substitutions).forEach(([name, nested]) => {
-            if (nested === null) {
-              delete result.substitutions[name];
-              return;
-            }
-            const merged = mergeSubstitution(
-              result.substitutions[name] || {},
-              nested,
-            );
-            if (merged === null) {
-              delete result.substitutions[name];
-            } else {
-              result.substitutions[name] = merged;
-            }
-          });
-        }
-        if (patch.args !== undefined) {
-          if (patch.args === null) {
-            delete result.args;
-          } else {
-            result.args = patch.args;
-          }
         }
         if (pruneSubstitutionInPlace(result)) {
           return null;
@@ -3116,13 +3054,6 @@
               }
             });
           }
-          if (payload.args !== undefined) {
-            if (payload.args === null) {
-              delete translation.args;
-            } else {
-              translation.args = payload.args;
-            }
-          }
 
           if (
             translation.substitutions &&
@@ -3156,9 +3087,6 @@
         }
         if (payload.substitutions !== undefined) {
           body.substitutions = payload.substitutions;
-        }
-        if (payload.args !== undefined) {
-          body.args = payload.args;
         }
 
         const res = await fetch("/api/translations", {

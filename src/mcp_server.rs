@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::store::{
-    StoreError, TranslationRecord, TranslationSummary, TranslationUpdate, TranslationValue,
-    XcStringsStore, XcStringsStoreManager,
+    StoreError, SubstitutionUpdate, TranslationRecord, TranslationSummary, TranslationUpdate,
+    TranslationValue, XcStringsStore, XcStringsStoreManager,
 };
 
 #[derive(Clone)]
@@ -96,6 +96,10 @@ struct UpsertTranslationParams {
     pub state: Option<Option<String>>,
     #[serde(default)]
     pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
+    #[serde(default)]
+    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
+    #[serde(default)]
+    pub args: Option<Option<Vec<serde_json::Value>>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema, Clone)]
@@ -106,6 +110,10 @@ struct VariationUpdateParam {
     pub state: Option<Option<String>>,
     #[serde(default)]
     pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
+    #[serde(default)]
+    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
+    #[serde(default)]
+    pub args: Option<Option<Vec<serde_json::Value>>>,
 }
 
 impl VariationUpdateParam {
@@ -126,6 +134,71 @@ impl VariationUpdateParam {
                     })
                     .collect(),
             );
+        }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
+        }
+        update
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema, Clone)]
+struct SubstitutionUpdateParam {
+    #[serde(default)]
+    pub value: Option<Option<String>>,
+    #[serde(default)]
+    pub state: Option<Option<String>>,
+    #[serde(rename = "argNum", default)]
+    pub arg_num: Option<Option<i64>>,
+    #[serde(rename = "formatSpecifier", default)]
+    pub format_specifier: Option<Option<String>>,
+    #[serde(default)]
+    pub variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdateParam>>>,
+    #[serde(default)]
+    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdateParam>>>,
+    #[serde(default)]
+    pub args: Option<Option<Vec<serde_json::Value>>>,
+}
+
+impl SubstitutionUpdateParam {
+    fn into_update(self) -> SubstitutionUpdate {
+        let mut update = SubstitutionUpdate::default();
+        update.value = self.value;
+        update.state = self.state;
+        update.arg_num = self.arg_num;
+        update.format_specifier = self.format_specifier;
+        if let Some(variations) = self.variations {
+            update.variations = Some(
+                variations
+                    .into_iter()
+                    .map(|(selector, cases)| {
+                        let cases = cases
+                            .into_iter()
+                            .map(|(case, nested)| (case, nested.into_update()))
+                            .collect();
+                        (selector, cases)
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
         }
         update
     }
@@ -150,6 +223,17 @@ impl UpsertTranslationParams {
                     .collect(),
             );
         }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
+        }
         update
     }
 }
@@ -172,6 +256,14 @@ struct SetCommentParams {
     pub path: String,
     pub key: String,
     pub comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SetExtractionStateParams {
+    pub path: String,
+    pub key: String,
+    #[serde(rename = "extractionState")]
+    pub extraction_state: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -328,6 +420,20 @@ impl XcStringsMcpServer {
             .await
             .map_err(Self::error_to_mcp)?;
         Ok(render_ok_message("Comment updated"))
+    }
+
+    #[tool(description = "Set or clear the extraction state for a string key")]
+    async fn set_extraction_state(
+        &self,
+        params: Parameters<SetExtractionStateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
+            .set_extraction_state(&params.key, params.extraction_state.clone())
+            .await
+            .map_err(Self::error_to_mcp)?;
+        Ok(render_ok_message("Extraction state updated"))
     }
 
     #[tool(description = "List all languages present in the xcstrings file")]
@@ -580,6 +686,8 @@ mod tests {
                 value: Some(Some("One".into())),
                 state: None,
                 variations: None,
+                substitutions: None,
+                args: None,
             },
         );
         plural_cases.insert(
@@ -588,6 +696,8 @@ mod tests {
                 value: Some(Some("Many".into())),
                 state: None,
                 variations: None,
+                substitutions: None,
+                args: None,
             },
         );
 
@@ -602,6 +712,8 @@ mod tests {
                 value: None,
                 state: None,
                 variations: Some(variations),
+                substitutions: None,
+                args: None,
             }))
             .await
             .expect("tool success");
@@ -624,6 +736,48 @@ mod tests {
             plural.get("other").and_then(|entry| entry.value.as_deref()),
             Some("Many"),
         );
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_extraction_state_tool_updates_entry() {
+        let path = fresh_store_path("set_extraction_state");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: "message".into(),
+                extraction_state: Some("manual".into()),
+            }))
+            .await
+            .expect("tool success");
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+        let records = store.list_records(None).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].extraction_state.as_deref(), Some("manual"));
+
+        server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: "message".into(),
+                extraction_state: None,
+            }))
+            .await
+            .expect("tool success");
+        let records = store.list_records(None).await;
+        assert!(records[0].extraction_state.is_none());
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

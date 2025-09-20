@@ -8,12 +8,13 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::store::{
-    StoreError, TranslationRecord, TranslationUpdate, TranslationValue, XcStringsStore,
-    XcStringsStoreManager,
+    StoreError, SubstitutionUpdate, TranslationRecord, TranslationUpdate, TranslationValue,
+    XcStringsStore, XcStringsStoreManager,
 };
 
 #[derive(Debug, Serialize)]
@@ -68,6 +69,10 @@ struct UpsertRequest {
     state: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    #[serde(default)]
+    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
+    #[serde(default)]
+    args: Option<Option<Vec<Value>>>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -78,6 +83,10 @@ struct VariationUpdatePayload {
     state: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    #[serde(default)]
+    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
+    #[serde(default)]
+    args: Option<Option<Vec<Value>>>,
 }
 
 impl VariationUpdatePayload {
@@ -98,6 +107,71 @@ impl VariationUpdatePayload {
                     })
                     .collect(),
             );
+        }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
+        }
+        update
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct SubstitutionUpdatePayload {
+    #[serde(default)]
+    value: Option<Option<String>>,
+    #[serde(default)]
+    state: Option<Option<String>>,
+    #[serde(rename = "argNum", default)]
+    arg_num: Option<Option<i64>>,
+    #[serde(rename = "formatSpecifier", default)]
+    format_specifier: Option<Option<String>>,
+    #[serde(default)]
+    variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    #[serde(default)]
+    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
+    #[serde(default)]
+    args: Option<Option<Vec<Value>>>,
+}
+
+impl SubstitutionUpdatePayload {
+    fn into_update(self) -> SubstitutionUpdate {
+        let mut update = SubstitutionUpdate::default();
+        update.value = self.value;
+        update.state = self.state;
+        update.arg_num = self.arg_num;
+        update.format_specifier = self.format_specifier;
+        if let Some(variations) = self.variations {
+            update.variations = Some(
+                variations
+                    .into_iter()
+                    .map(|(selector, cases)| {
+                        let cases = cases
+                            .into_iter()
+                            .map(|(case, nested)| (case, nested.into_update()))
+                            .collect();
+                        (selector, cases)
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
         }
         update
     }
@@ -122,6 +196,17 @@ impl UpsertRequest {
                     .collect(),
             );
         }
+        if let Some(substitutions) = self.substitutions {
+            update.substitutions = Some(
+                substitutions
+                    .into_iter()
+                    .map(|(name, payload)| (name, payload.map(|value| value.into_update())))
+                    .collect(),
+            );
+        }
+        if let Some(args) = self.args {
+            update.args = Some(args);
+        }
         update
     }
 }
@@ -141,6 +226,15 @@ struct RenameKeyRequest {
     path: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExtractionStateRequest {
+    key: String,
+    #[serde(rename = "extractionState", default)]
+    extraction_state: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
 pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
     Router::new()
         .route("/", get(index))
@@ -155,6 +249,7 @@ pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
         )
         .route("/api/keys/:key", delete(delete_key).put(rename_key))
         .route("/api/comments", post(update_comment))
+        .route("/api/extraction-state", post(update_extraction_state))
         .route("/api/languages", get(list_languages))
         .layer(Extension(manager))
 }
@@ -285,6 +380,19 @@ async fn update_comment(
     let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
     store
         .set_comment(&payload.key, payload.comment.clone())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_extraction_state(
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
+    Json(payload): Json<ExtractionStateRequest>,
+) -> Result<StatusCode, ApiError> {
+    let path = payload.path.clone();
+    let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
+    store
+        .set_extraction_state(&payload.key, payload.extraction_state.clone())
         .await
         .map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)

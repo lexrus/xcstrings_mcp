@@ -93,8 +93,8 @@
       input:not(.search-field),
       textarea {
         font-family:
-          "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
-          "Courier New", monospace;
+          "Maple Mono NF CN", "JetBrainsMono", "SF Mono", Monaco,
+          "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
         font-size: 0.9rem;
         border-radius: 0;
         border: 1px solid #c7c7cd;
@@ -123,6 +123,82 @@
         padding: 0.25rem 0.5rem;
         width: 100%;
         height: 1.6rem;
+      }
+      .meta-row {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+      }
+      .meta-select,
+      .state-select {
+        appearance: none;
+        background: #fff;
+        color: #1c1c1e;
+        padding: 0.3rem 2rem 0.3rem 0.5rem;
+        border-radius: 0;
+        border: 1px solid #c7c7cd;
+        font-size: 0.85rem;
+        cursor: pointer;
+      }
+      .meta-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6e6e73;
+      }
+      .meta-select:focus,
+      .state-select:focus {
+        outline: none;
+        border-color: #0a84ff;
+      }
+      .state-options {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .state-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.2rem 0.55rem;
+        border: 1px solid #c7c7cd;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        color: #1c1c1e;
+        cursor: pointer;
+        transition:
+          border-color 0.2s ease,
+          background 0.2s ease;
+      }
+      .state-pill input[type="radio"] {
+        accent-color: #1c1c1e;
+      }
+      .state-pill:hover {
+        border-color: #8e8e93;
+        background: #f4f4f5;
+      }
+      .state-pill.active {
+        border-color: #1c1c1e;
+        background: #e5e5ea;
+        font-weight: 600;
+      }
+      .state-pill.disabled,
+      .state-pill input[disabled] + span,
+      .state-pill input[disabled] {
+        cursor: not-allowed;
+        color: #8e8e93;
+      }
+      .translation-input {
+        border: 1px solid #c7c7cd;
+        transition: border-color 0.2s ease;
+      }
+      .translation-input.state-positive {
+        border-color: #239a3b;
+      }
+      .translation-input.state-warning {
+        border-color: #c96a14;
       }
       input.comment-input:hover {
         border-color: #d1d1d6;
@@ -251,21 +327,52 @@
       .translation-row:hover {
         background: rgba(245, 245, 247, 0.6);
       }
-      .translation-row .key-tools {
-        opacity: 0;
-        transition: opacity 0.2s ease;
+      .translation-row > td:first-child {
+        border-left: 4px solid transparent;
+        transition: border-color 0.2s ease;
       }
-      .translation-row:hover .key-tools,
-      .translation-row:focus-within .key-tools {
-        opacity: 1;
+      .translation-row.state-positive > td:first-child {
+        border-left-color: #239a3b;
       }
-      .translation-row .key-tools .icon-button:nth-child(3) {
-        opacity: 0;
-        transition: opacity 0.2s ease;
+      .translation-row.state-warning > td:first-child {
+        border-left-color: #c96a14;
       }
-      .translation-row:hover .key-tools .icon-button:nth-child(3),
-      .translation-row:focus-within .key-tools .icon-button:nth-child(3) {
-        opacity: 1;
+      .translation-row.collapsed .row-details {
+        display: none;
+      }
+      .translation-row.collapsed .key-tools,
+      .translation-row.collapsed .add-substitution-button {
+        display: none;
+      }
+      .row-details {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        margin-top: 0.6rem;
+      }
+      .key-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+      .row-expand {
+        border: none;
+        background: transparent;
+        color: #6e6e73;
+        cursor: pointer;
+        padding: 0;
+        width: 1.5rem;
+        height: 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .row-expand:hover {
+        color: #1c1c1e;
+      }
+      .row-expand:focus-visible {
+        outline: 1px solid #0a84ff;
+        outline-offset: 2px;
       }
       .lang-button {
         background: #f0f0f2;
@@ -333,10 +440,11 @@
       }
       .key-header {
         display: flex;
-        flex-direction: column;
-        gap: 0.3rem;
+        align-items: center;
+        gap: 0.4rem;
       }
       .key-input {
+        flex: 1;
         width: 100%;
         font-size: 1rem;
         font-weight: 600;
@@ -359,6 +467,16 @@
       }
       .icon-button:hover {
         background: #e0e0e5;
+      }
+      .icon-button.subtle {
+        background: transparent;
+        border-color: transparent;
+        color: #6e6e73;
+      }
+      .icon-button.subtle:hover {
+        border-color: #c7c7cd;
+        color: #1c1c1e;
+        background: #f5f5f7;
       }
       .icon-button.danger {
         background: #fff4f3;
@@ -415,6 +533,160 @@
         display: flex;
         flex-direction: column;
         gap: 0.5rem;
+      }
+      .substitutions-panel {
+        margin-top: 0.8rem;
+        border: 1px solid #d6d6db;
+        background: #fdfdfd;
+      }
+      .substitutions-panel summary {
+        padding: 0.45rem 0.75rem;
+        font-size: 0.72rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #6e6e73;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .substitutions-panel summary::marker {
+        display: none;
+      }
+      .substitutions-panel summary::-webkit-details-marker {
+        display: none;
+      }
+      .substitutions-panel[open] summary {
+        border-bottom: 1px solid #e0e0e5;
+      }
+      .substitutions-section {
+        padding: 0.75rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+      .substitution-block {
+        border: 1px solid #e0e0e5;
+        background: #fafafa;
+        padding: 0.7rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+      }
+      .substitution-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .substitution-fields {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.45rem;
+        align-items: center;
+      }
+      .substitution-fields input,
+      .substitution-fields textarea {
+        width: 100%;
+      }
+      .substitution-actions {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+      }
+      .state-options.compact {
+        gap: 0.3rem;
+      }
+      .state-options.compact .state-pill {
+        font-size: 0.7rem;
+        padding: 0.15rem 0.4rem;
+      }
+      .variation-section {
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+      }
+      .variation-block {
+        border: 1px solid #e0e0e5;
+        background: #fff;
+        padding: 0.6rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      .variation-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+      }
+      .variation-cases {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+      }
+      .variation-row {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+      }
+      .variation-case-label {
+        font-family:
+          "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas,
+          "Courier New", monospace;
+        font-size: 0.78rem;
+        color: #636366;
+      }
+      .variation-row-content {
+        display: flex;
+        gap: 0.5rem;
+        align-items: flex-start;
+      }
+      .variation-row-content textarea {
+        flex: 1;
+        resize: none;
+        min-height: 2rem;
+      }
+      .variation-actions,
+      .variation-add-row {
+        display: flex;
+        gap: 0.4rem;
+        flex-wrap: wrap;
+        position: relative;
+      }
+      .variation-action {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+      .variation-picker {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 0.3rem;
+        background: #fff;
+        border: 1px solid #c7c7cd;
+        padding: 0.4rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        z-index: 20;
+      }
+      .variation-picker.hidden {
+        display: none;
+      }
+      .variation-option {
+        border: none;
+        background: transparent;
+        font-size: 0.8rem;
+        color: #1c1c1e;
+        text-align: left;
+        padding: 0.2rem 0.4rem;
+        cursor: pointer;
+      }
+      .variation-option:hover {
+        background: #f0f0f2;
       }
       .plural-row {
         display: flex;
@@ -539,7 +811,6 @@
     <nav class="nav-bar">
       <div class="nav-left">
         <div class="file-select-group">
-          <label class="nav-label" for="file-select">File</label>
           <div class="file-select-wrapper">
             <select
               id="file-select"
@@ -548,15 +819,15 @@
             ></select>
           </div>
         </div>
+        <button class="refresh-button" id="refresh" title="Refresh list">
+          Refresh
+        </button>
         <input
           type="text"
           id="search"
           class="search-field"
           placeholder="Search keys or translations"
         />
-        <button class="refresh-button" id="refresh" title="Refresh list">
-          Refresh
-        </button>
       </div>
       <div class="nav-center">
         <label class="nav-label" for="language-select">Language</label>
@@ -649,6 +920,36 @@
       };
 
       const PLURAL_CASES = ["zero", "one", "two", "few", "many", "other"];
+      const EXTRACTION_STATES = ["automatic", "manual"];
+      const TRANSLATION_STATES = [
+        "",
+        "new",
+        "translated",
+        "needs_review",
+        "stale",
+        "verified",
+      ];
+      const TRANSLATION_STATE_LABELS = {
+        "": "Unset",
+        new: "New",
+        translated: "Translated",
+        needs_review: "Needs review",
+        stale: "Stale",
+        verified: "Verified",
+      };
+      const DEVICE_CASES = [
+        "universal",
+        "iphone",
+        "ipad",
+        "mac",
+        "watch",
+        "tv",
+        "vision",
+      ];
+      const VARIATION_SELECTORS = {
+        plural: { label: "Plural", cases: PLURAL_CASES },
+        device: { label: "Device", cases: DEVICE_CASES },
+      };
       const state = {
         files: [],
         currentPath: null,
@@ -658,6 +959,8 @@
         items: [],
         drafts: [],
       };
+      const expandedRows = new Set();
+      let pendingScrollRestore = null;
 
       const SAMPLE_MODE = window.location.protocol === "file:";
       const SAMPLE_DATA = {
@@ -666,6 +969,7 @@
           {
             key: "welcome_title",
             comment: "Shown at the top of the dashboard",
+            extractionState: "manual",
             translations: {
               en: { value: "Welcome" },
               fr: { value: "Bienvenue" },
@@ -675,6 +979,7 @@
           {
             key: "items_count",
             comment: "Displays the current number of tracked items",
+            extractionState: "manual",
             translations: {
               en: {
                 value: "{count} item",
@@ -708,6 +1013,7 @@
           {
             key: "sync_status",
             comment: "Banner shown while syncing with the localization service",
+            extractionState: "automatic",
             translations: {
               en: { value: "Syncing latest content..." },
               fr: { value: "Synchronisation du contenu..." },
@@ -742,6 +1048,260 @@
         return `${languageLabel(code)}(${code})`;
       }
 
+      function translationStateLabel(value) {
+        const normalized = value || "";
+        if (TRANSLATION_STATE_LABELS[normalized] !== undefined) {
+          return TRANSLATION_STATE_LABELS[normalized];
+        }
+        return normalized
+          .split("_")
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      }
+
+      function applyTranslationStateStyles(textarea, stateValue) {
+        if (!textarea) {
+          return;
+        }
+        const normalized = stateValue || "";
+        textarea.classList.remove("state-positive", "state-warning");
+        if (normalized === "translated" || normalized === "verified") {
+          textarea.classList.add("state-positive");
+        } else if (normalized) {
+          textarea.classList.add("state-warning");
+        }
+      }
+
+      function applyRowStateStyles(row, stateValue) {
+        if (!row) {
+          return;
+        }
+        const normalized = stateValue || "";
+        row.classList.remove("state-positive", "state-warning");
+        if (normalized === "translated" || normalized === "verified") {
+          row.classList.add("state-positive");
+        } else if (normalized) {
+          row.classList.add("state-warning");
+        }
+      }
+
+      function captureScrollPosition() {
+        pendingScrollRestore = window.scrollY;
+      }
+
+      function restoreScrollPositionIfNeeded() {
+        if (pendingScrollRestore === null) {
+          return;
+        }
+        const target = pendingScrollRestore;
+        pendingScrollRestore = null;
+        requestAnimationFrame(() => {
+          window.scrollTo(0, target);
+        });
+      }
+
+      function isInteractiveTarget(target) {
+        return Boolean(
+          target.closest(
+            "input, textarea, select, button, a, .state-pill, .plural-picker, .variation-picker",
+          ),
+        );
+      }
+
+      function availableVariationCases(selector, existingKeys) {
+        const config = VARIATION_SELECTORS[selector];
+        if (!config) {
+          return [];
+        }
+        return config.cases.filter(
+          (caseKey) => !existingKeys.includes(caseKey),
+        );
+      }
+
+      function variationLabel(selector) {
+        const config = VARIATION_SELECTORS[selector];
+        if (config) {
+          return config.label;
+        }
+        return selector.charAt(0).toUpperCase() + selector.slice(1);
+      }
+
+      function pruneTranslationInPlace(node) {
+        if (!node || typeof node !== "object") {
+          return true;
+        }
+
+        if (node.value === null || node.value === undefined) {
+          delete node.value;
+        }
+        if (
+          node.state === null ||
+          node.state === undefined ||
+          node.state === ""
+        ) {
+          delete node.state;
+        }
+
+        if (node.variations) {
+          Object.entries(node.variations).forEach(([selector, cases]) => {
+            if (!cases || typeof cases !== "object") {
+              delete node.variations[selector];
+              return;
+            }
+            Object.entries(cases).forEach(([caseKey, entry]) => {
+              if (!entry || typeof entry !== "object") {
+                delete cases[caseKey];
+                return;
+              }
+              if (pruneTranslationInPlace(entry)) {
+                delete cases[caseKey];
+              }
+            });
+            if (Object.keys(cases).length === 0) {
+              delete node.variations[selector];
+            }
+          });
+          if (Object.keys(node.variations).length === 0) {
+            delete node.variations;
+          }
+        }
+
+        if (node.substitutions) {
+          Object.entries(node.substitutions).forEach(([name, sub]) => {
+            if (pruneSubstitutionInPlace(sub)) {
+              delete node.substitutions[name];
+            }
+          });
+          if (Object.keys(node.substitutions).length === 0) {
+            delete node.substitutions;
+          }
+        }
+
+        if (Array.isArray(node.args)) {
+          if (node.args.length === 0) {
+            delete node.args;
+          }
+        } else if (node.args === null || node.args === undefined) {
+          delete node.args;
+        }
+
+        const hasValue = node.value !== undefined;
+        const hasState = node.state !== undefined;
+        const hasVariations =
+          node.variations && Object.keys(node.variations).length > 0;
+        const hasSubstitutions =
+          node.substitutions && Object.keys(node.substitutions).length > 0;
+        const hasArgs = Array.isArray(node.args) && node.args.length > 0;
+
+        return (
+          !hasValue &&
+          !hasState &&
+          !hasVariations &&
+          !hasSubstitutions &&
+          !hasArgs
+        );
+      }
+
+      function pruneSubstitutionInPlace(substitution) {
+        if (!substitution || typeof substitution !== "object") {
+          return true;
+        }
+
+        if (substitution.value === null || substitution.value === undefined) {
+          delete substitution.value;
+        }
+        if (
+          substitution.state === null ||
+          substitution.state === undefined ||
+          substitution.state === ""
+        ) {
+          delete substitution.state;
+        }
+        if (substitution.argNum === null || substitution.argNum === undefined) {
+          delete substitution.argNum;
+        }
+        if (
+          substitution.formatSpecifier === null ||
+          substitution.formatSpecifier === undefined ||
+          substitution.formatSpecifier === ""
+        ) {
+          delete substitution.formatSpecifier;
+        }
+
+        if (substitution.variations) {
+          Object.entries(substitution.variations).forEach(
+            ([selector, cases]) => {
+              if (!cases || typeof cases !== "object") {
+                delete substitution.variations[selector];
+                return;
+              }
+              Object.entries(cases).forEach(([caseKey, entry]) => {
+                if (!entry || typeof entry !== "object") {
+                  delete cases[caseKey];
+                  return;
+                }
+                if (pruneTranslationInPlace(entry)) {
+                  delete cases[caseKey];
+                }
+              });
+              if (Object.keys(cases).length === 0) {
+                delete substitution.variations[selector];
+              }
+            },
+          );
+          if (Object.keys(substitution.variations).length === 0) {
+            delete substitution.variations;
+          }
+        }
+
+        if (substitution.substitutions) {
+          Object.entries(substitution.substitutions).forEach(
+            ([name, nested]) => {
+              if (pruneSubstitutionInPlace(nested)) {
+                delete substitution.substitutions[name];
+              }
+            },
+          );
+          if (Object.keys(substitution.substitutions).length === 0) {
+            delete substitution.substitutions;
+          }
+        }
+
+        if (Array.isArray(substitution.args)) {
+          if (substitution.args.length === 0) {
+            delete substitution.args;
+          }
+        } else if (
+          substitution.args === null ||
+          substitution.args === undefined
+        ) {
+          delete substitution.args;
+        }
+
+        const hasValue = substitution.value !== undefined;
+        const hasState = substitution.state !== undefined;
+        const hasArgNum = substitution.argNum !== undefined;
+        const hasFormat = substitution.formatSpecifier !== undefined;
+        const hasVariations =
+          substitution.variations &&
+          Object.keys(substitution.variations).length > 0;
+        const hasSubstitutions =
+          substitution.substitutions &&
+          Object.keys(substitution.substitutions).length > 0;
+        const hasArgs =
+          Array.isArray(substitution.args) && substitution.args.length > 0;
+
+        return (
+          !hasValue &&
+          !hasState &&
+          !hasArgNum &&
+          !hasFormat &&
+          !hasVariations &&
+          !hasSubstitutions &&
+          !hasArgs
+        );
+      }
+
       function translationHeaderText() {
         if (!state.currentLanguage) {
           return "Translation";
@@ -756,6 +1316,7 @@
         state.drafts = state.drafts.filter(
           (draft) => draft.__draftId !== draftId,
         );
+        expandedRows.delete(draftId);
       }
 
       function renderLanguageControls() {
@@ -926,6 +1487,9 @@
           renderTable();
           return;
         }
+        if (pendingScrollRestore === null) {
+          captureScrollPosition();
+        }
         if (SAMPLE_MODE) {
           const normalized = query.trim().toLowerCase();
           const filtered = !normalized
@@ -949,6 +1513,18 @@
                     if (entry?.value) {
                       bucket.push(entry.value);
                     }
+                  });
+                  const substitutions = translation.substitutions || {};
+                  Object.values(substitutions).forEach((sub) => {
+                    if (sub?.value) {
+                      bucket.push(sub.value);
+                    }
+                    const subPlural = sub?.variations?.plural || {};
+                    Object.values(subPlural).forEach((entry) => {
+                      if (entry?.value) {
+                        bucket.push(entry.value);
+                      }
+                    });
                   });
                 });
                 return bucket.join(" ").toLowerCase().includes(normalized);
@@ -993,7 +1569,9 @@
           state.drafts = [];
           renderFileSelector();
           await fetchLanguages();
-          await fetchTranslations(document.getElementById("search").value || "");
+          await fetchTranslations(
+            document.getElementById("search").value || "",
+          );
           return;
         }
 
@@ -1068,9 +1646,14 @@
 
       function renderTable() {
         const tbody = document.getElementById("translations-body");
-        tbody.innerHTML = "";
+        if (!tbody) {
+          return;
+        }
         const rows = [...state.drafts, ...state.items];
-        rows.forEach((item) => {
+        const seenRowIds = new Set();
+        tbody.innerHTML = "";
+
+        rows.forEach((item, index) => {
           const isDraft = Boolean(item.__draft);
           if (!item.translations) {
             item.translations = {};
@@ -1079,12 +1662,29 @@
           const tr = document.createElement("tr");
           tr.className = "translation-row";
 
+          const rowId = isDraft
+            ? item.__draftId || `draft-${index}`
+            : item.key || `row-${index}`;
+          tr.dataset.rowId = rowId;
+          seenRowIds.add(rowId);
+
+          const ensureExpanded = () => {
+            expandedRows.add(rowId);
+            syncExpansion();
+          };
+
+          const ensureCollapsed = () => {
+            expandedRows.delete(rowId);
+            syncExpansion();
+          };
+
           const keyCell = document.createElement("td");
           keyCell.className = "key-cell";
           const keyWrapper = document.createElement("div");
           keyWrapper.className = "key-wrapper";
 
-          // Comment input first
+          let activeKey = item.key || "";
+
           const commentInput = document.createElement("input");
           commentInput.type = "text";
           commentInput.className = "comment-input";
@@ -1101,34 +1701,34 @@
               commentInput.value = item.comment || "";
               return;
             }
-          if (SAMPLE_MODE) {
-            const target = sampleStore.items.find(
-              (entry) => entry.key === activeKey,
-            );
-            if (!target) {
-              setStatus("Save the translation before adding comments", true);
+            if (SAMPLE_MODE) {
+              const target = sampleStore.items.find(
+                (entry) => entry.key === activeKey,
+              );
+              if (!target) {
+                setStatus("Save the translation before adding comments", true);
+                commentInput.value = item.comment || "";
+                return;
+              }
+              target.comment = event.target.value || "";
+              item.comment = target.comment;
+              setStatus("Comment saved");
+              return;
+            }
+            if (!state.currentPath) {
+              setStatus("Select a file before saving comments", true);
               commentInput.value = item.comment || "";
               return;
             }
-            target.comment = event.target.value || "";
-            item.comment = target.comment;
-            setStatus("Comment saved");
-            return;
-          }
-          if (!state.currentPath) {
-            setStatus("Select a file before saving comments", true);
-            commentInput.value = item.comment || "";
-            return;
-          }
-          const res = await fetch("/api/comments", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              key: activeKey,
-              path: state.currentPath,
-              comment: event.target.value || null,
-            }),
-          });
+            const res = await fetch("/api/comments", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                key: activeKey,
+                path: state.currentPath,
+                comment: event.target.value || null,
+              }),
+            });
             if (res.ok) {
               item.comment = event.target.value;
               setStatus("Comment saved");
@@ -1136,22 +1736,59 @@
               setStatus("Failed to save comment", true);
             }
           });
-          keyWrapper.appendChild(commentInput);
-
           const keyHeader = document.createElement("div");
           keyHeader.className = "key-header";
+
+          const expandToggle = document.createElement("button");
+          expandToggle.type = "button";
+          expandToggle.className = "row-expand";
+          expandToggle.title = "Toggle details";
+          expandToggle.setAttribute("aria-label", "Toggle details");
+          keyHeader.appendChild(expandToggle);
+
+          const syncExpansion = () => {
+            const expanded = expandedRows.has(rowId);
+            expandToggle.textContent = expanded ? "▾" : "▸";
+            expandToggle.setAttribute(
+              "aria-expanded",
+              expanded ? "true" : "false",
+            );
+            tr.classList.toggle("collapsed", !expanded);
+          };
+
+          if (expandedRows.has(rowId)) {
+            ensureExpanded();
+          } else {
+            ensureCollapsed();
+          }
+
+          expandToggle.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (expandedRows.has(rowId)) {
+              ensureCollapsed();
+            } else {
+              ensureExpanded();
+            }
+          });
+
+          tr.addEventListener("click", (event) => {
+            if (isInteractiveTarget(event.target)) {
+              return;
+            }
+            if (!expandedRows.has(rowId)) {
+              ensureExpanded();
+            }
+          });
 
           const keyInput = document.createElement("input");
           keyInput.type = "text";
           keyInput.className = "key-input";
-          keyInput.value = item.key || "";
+          keyInput.value = activeKey;
           keyInput.placeholder = isDraft ? "New key" : "";
           keyInput.spellcheck = false;
           if (isDraft) {
             keyInput.dataset.draft = item.__draftId;
           }
-
-          let activeKey = item.key || "";
 
           keyInput.addEventListener("focus", () => {
             keyInput.setSelectionRange(0, keyInput.value.length);
@@ -1188,14 +1825,69 @@
             }
             try {
               await renameKey(activeKey, nextKey);
+              if (!isDraft && expandedRows.has(rowId)) {
+                expandedRows.delete(rowId);
+                expandedRows.add(nextKey);
+              }
               activeKey = nextKey;
               setStatus("Key renamed");
+              captureScrollPosition();
               await fetchTranslations(document.getElementById("search").value);
             } catch (error) {
               setStatus(error.message, true);
               keyInput.value = activeKey;
             }
           });
+
+          keyHeader.appendChild(keyInput);
+          keyWrapper.appendChild(keyHeader);
+
+          keyWrapper.appendChild(commentInput);
+
+          const keyDetails = document.createElement("div");
+          keyDetails.className = "row-details";
+          let keyDetailsHasContent = false;
+
+          const metaRow = document.createElement("div");
+          metaRow.className = "meta-row";
+
+          const extractionLabel = document.createElement("span");
+          extractionLabel.className = "meta-label";
+          extractionLabel.textContent = "Extraction";
+          metaRow.appendChild(extractionLabel);
+
+          const extractionSelect = document.createElement("select");
+          extractionSelect.className = "meta-select";
+          const extractionOptions = ["", ...EXTRACTION_STATES];
+          extractionOptions.forEach((option) => {
+            const opt = document.createElement("option");
+            opt.value = option;
+            opt.textContent = option ? option : "(default)";
+            extractionSelect.appendChild(opt);
+          });
+          extractionSelect.value = item.extractionState || "";
+          extractionSelect.disabled = isDraft;
+          extractionSelect.addEventListener("change", async (event) => {
+            const next = event.target.value || null;
+            if (!activeKey) {
+              item.extractionState = next;
+              return;
+            }
+            if (isDraft) {
+              item.extractionState = next;
+              return;
+            }
+            try {
+              await updateExtractionState(activeKey, next);
+              item.extractionState = next;
+            } catch (error) {
+              setStatus(error.message, true);
+              extractionSelect.value = item.extractionState || "";
+            }
+          });
+          metaRow.appendChild(extractionSelect);
+          keyDetails.appendChild(metaRow);
+          keyDetailsHasContent = true;
 
           const keyTools = document.createElement("div");
           keyTools.className = "key-tools";
@@ -1230,6 +1922,9 @@
               setStatus("Draft removed");
               return;
             }
+            if (!activeKey) {
+              return;
+            }
             if (!confirm(`Delete key "${activeKey}" for all languages?`)) {
               return;
             }
@@ -1243,6 +1938,7 @@
               }
               sampleStore.items.splice(index, 1);
               setStatus("Key deleted");
+              captureScrollPosition();
               await fetchTranslations(document.getElementById("search").value);
               return;
             }
@@ -1250,13 +1946,16 @@
               setStatus("Select a file before deleting keys", true);
               return;
             }
-            const deleteParams = new URLSearchParams({ path: state.currentPath });
+            const deleteParams = new URLSearchParams({
+              path: state.currentPath,
+            });
             const res = await fetch(
               `/api/keys/${encodeURIComponent(activeKey)}?${deleteParams.toString()}`,
               { method: "DELETE" },
             );
             if (res.ok) {
               setStatus("Key deleted");
+              captureScrollPosition();
               await fetchTranslations(document.getElementById("search").value);
             } else {
               let message = "Failed to delete key";
@@ -1274,11 +1973,12 @@
 
           keyTools.appendChild(copyBtn);
           keyTools.appendChild(deleteKeyBtn);
+          keyDetails.appendChild(keyTools);
+          keyDetailsHasContent = true;
 
-          keyHeader.appendChild(keyInput);
-          keyHeader.appendChild(keyTools);
-
-          keyWrapper.appendChild(keyHeader);
+          if (keyDetailsHasContent) {
+            keyWrapper.appendChild(keyDetails);
+          }
           keyCell.appendChild(keyWrapper);
           tr.appendChild(keyCell);
 
@@ -1287,7 +1987,6 @@
           const translationWrapper = document.createElement("div");
           translationWrapper.className = "translation-wrapper";
 
-          // Reference display
           const reference =
             !isDraft && state.referenceLanguage ? referenceFor(item) : null;
           if (reference) {
@@ -1323,18 +2022,122 @@
             ? item.translations[state.currentLanguage] || {}
             : {};
 
-          const textarea = document.createElement("textarea");
-          textarea.className = "translation-input";
-          textarea.placeholder = `Enter ${languageLabel(state.currentLanguage || "")} translation`;
-          textarea.value = translation.value || "";
-          textarea.addEventListener("change", async (event) => {
+          let translationTextarea;
+          const translationDetails = document.createElement("div");
+          translationDetails.className = "row-details translation-details";
+          let translationDetailsHasContent = false;
+
+          const translationMeta = document.createElement("div");
+          translationMeta.className = "meta-row";
+
+          const translationLabel = document.createElement("span");
+          translationLabel.className = "meta-label";
+          translationLabel.textContent = "State";
+          translationMeta.appendChild(translationLabel);
+
+          const stateGroup = document.createElement("div");
+          stateGroup.className = "state-options";
+          const radioGroupName = `translation-state-${
+            activeKey || item.__draftId || Math.random().toString(36).slice(2)
+          }`;
+
+          const updateStateVisuals = () => {
+            const current = translation.state || "";
+            stateGroup.querySelectorAll("label.state-pill").forEach((pill) => {
+              const radio = pill.querySelector('input[type="radio"]');
+              const value = radio.value || "";
+              const shouldCheck = value === current;
+              radio.checked = shouldCheck;
+              pill.classList.toggle("active", shouldCheck);
+              if (radio.disabled) {
+                pill.classList.add("disabled");
+              } else {
+                pill.classList.remove("disabled");
+              }
+            });
+            applyTranslationStateStyles(translationTextarea, translation.state);
+            applyRowStateStyles(tr, translation.state);
+          };
+
+          TRANSLATION_STATES.forEach((option) => {
+            const normalized = option || "";
+            const pill = document.createElement("label");
+            pill.className = "state-pill";
+
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = radioGroupName;
+            radio.value = normalized;
+            radio.disabled = !state.currentLanguage;
+            if ((translation.state || "") === normalized) {
+              radio.checked = true;
+              pill.classList.add("active");
+            }
+
+            radio.addEventListener("change", async () => {
+              if (!radio.checked) {
+                return;
+              }
+              const previous = translation.state || "";
+              const nextStateValue = normalized || null;
+
+              if (!state.currentLanguage) {
+                setStatus("Select a language before editing state", true);
+                translation.state = previous ? previous : null;
+                updateStateVisuals();
+                return;
+              }
+
+              if (!activeKey) {
+                translation.state = nextStateValue;
+                updateStateVisuals();
+                return;
+              }
+
+              try {
+                await updateTranslationState(
+                  activeKey,
+                  state.currentLanguage,
+                  nextStateValue,
+                );
+                translation.state = nextStateValue;
+              } catch (error) {
+                setStatus(error.message, true);
+                translation.state = previous ? previous : null;
+              }
+
+              updateStateVisuals();
+            });
+
+            const text = document.createElement("span");
+            text.textContent = translationStateLabel(normalized);
+
+            pill.appendChild(radio);
+            pill.appendChild(text);
+
+            if (radio.disabled) {
+              pill.classList.add("disabled");
+            }
+
+            stateGroup.appendChild(pill);
+          });
+
+          translationMeta.appendChild(stateGroup);
+          translationDetails.appendChild(translationMeta);
+          translationDetailsHasContent = true;
+
+          translationTextarea = document.createElement("textarea");
+          translationTextarea.className = "translation-input";
+          translationTextarea.placeholder = `Enter ${languageLabel(state.currentLanguage || "")} translation`;
+          translationTextarea.value = translation.value || "";
+          translationTextarea.addEventListener("change", async (event) => {
             if (!state.currentLanguage) {
               setStatus("Select a language before saving", true);
               return;
             }
             if (!activeKey) {
               setStatus("Set a key before saving a translation", true);
-              textarea.value = translation.value || "";
+              translationTextarea.value = translation.value || "";
               return;
             }
             try {
@@ -1348,6 +2151,7 @@
               );
               if (isDraft) {
                 dropDraft(item.__draftId);
+                captureScrollPosition();
                 await fetchTranslations(
                   document.getElementById("search").value,
                 );
@@ -1356,113 +2160,119 @@
               }
             } catch (error) {
               setStatus(error.message, true);
-              textarea.value = translation.value || "";
+              translationTextarea.value = translation.value || "";
             }
           });
 
-          translationWrapper.appendChild(textarea);
-          // Auto-resize main translation textarea
-          requestAnimationFrame(() => initAutoResize(textarea));
+          translationWrapper.appendChild(translationTextarea);
+          requestAnimationFrame(() => {
+            initAutoResize(translationTextarea);
+            updateStateVisuals();
+          });
 
           const pluralVariations =
             (translation.variations && translation.variations.plural) || {};
           const pluralKeys = Object.keys(pluralVariations);
+          if (pluralKeys.length) {
+            const pluralList = document.createElement("div");
+            pluralList.className = "plural-list";
 
-          const pluralList = document.createElement("div");
-          pluralList.className = "plural-list";
+            pluralKeys.forEach((caseKey) => {
+              const entry = pluralVariations[caseKey] || {};
+              const row = document.createElement("div");
+              row.className = "plural-row";
 
-          pluralKeys.forEach((caseKey) => {
-            const entry = pluralVariations[caseKey] || {};
-            const row = document.createElement("div");
-            row.className = "plural-row";
+              const label = document.createElement("label");
+              label.textContent = `plural: ${caseKey.toLowerCase()}`;
+              row.appendChild(label);
 
-            const label = document.createElement("label");
-            label.textContent = `plural: ${caseKey.toLowerCase()}`;
-            row.appendChild(label);
+              const rowContent = document.createElement("div");
+              rowContent.className = "plural-row-content";
 
-            const rowContent = document.createElement("div");
-            rowContent.className = "plural-row-content";
+              const variantTextarea = document.createElement("textarea");
+              variantTextarea.rows = 1;
+              variantTextarea.value = entry.value || "";
+              variantTextarea.addEventListener("change", async (event) => {
+                if (!activeKey) {
+                  setStatus(
+                    "Set a key before saving plural translations",
+                    true,
+                  );
+                  variantTextarea.value = entry.value || "";
+                  return;
+                }
+                const updates = { plural: {} };
+                updates.plural[caseKey] = { value: event.target.value };
+                try {
+                  await upsertTranslation(
+                    {
+                      key: activeKey,
+                      language: state.currentLanguage,
+                      variations: updates,
+                    },
+                    `Plural '${caseKey}' saved`,
+                  );
+                  if (isDraft) {
+                    dropDraft(item.__draftId);
+                    captureScrollPosition();
+                    await fetchTranslations(
+                      document.getElementById("search").value,
+                    );
+                  } else {
+                    entry.value = event.target.value;
+                  }
+                } catch (error) {
+                  setStatus(error.message, true);
+                  variantTextarea.value = entry.value || "";
+                }
+              });
+              rowContent.appendChild(variantTextarea);
+              requestAnimationFrame(() => initAutoResize(variantTextarea));
 
-            const variantTextarea = document.createElement("textarea");
-            variantTextarea.rows = 1;
-            variantTextarea.value = entry.value || "";
-            variantTextarea.addEventListener("change", async (event) => {
-              if (!activeKey) {
-                setStatus("Set a key before saving plural translations", true);
-                variantTextarea.value = entry.value || "";
-                return;
-              }
-              const updates = { plural: {} };
-              updates.plural[caseKey] = { value: event.target.value };
-              try {
-                await upsertTranslation(
-                  {
-                    key: activeKey,
-                    language: state.currentLanguage,
-                    variations: updates,
-                  },
-                  `Plural '${caseKey}' saved`,
-                );
-                if (isDraft) {
-                  dropDraft(item.__draftId);
+              const deleteVariant = document.createElement("button");
+              deleteVariant.type = "button";
+              deleteVariant.className = "icon-button danger";
+              deleteVariant.title = `Remove ${caseKey} plural`;
+              deleteVariant.textContent = "×";
+              deleteVariant.addEventListener("click", async () => {
+                if (!activeKey) {
+                  setStatus("Set a key before removing plural forms", true);
+                  return;
+                }
+                const updates = { plural: {} };
+                updates.plural[caseKey] = { value: null };
+                try {
+                  await upsertTranslation(
+                    {
+                      key: activeKey,
+                      language: state.currentLanguage,
+                      variations: updates,
+                    },
+                    `Plural '${caseKey}' removed`,
+                  );
+                  captureScrollPosition();
                   await fetchTranslations(
                     document.getElementById("search").value,
                   );
-                } else {
-                  entry.value = event.target.value;
+                } catch (error) {
+                  setStatus(error.message, true);
                 }
-              } catch (error) {
-                setStatus(error.message, true);
-                variantTextarea.value = entry.value || "";
-              }
+              });
+              rowContent.appendChild(deleteVariant);
+
+              row.appendChild(rowContent);
+              pluralList.appendChild(row);
             });
-            rowContent.appendChild(variantTextarea);
-            // Auto-resize plural textarea
-            requestAnimationFrame(() => initAutoResize(variantTextarea));
 
-            const deleteVariant = document.createElement("button");
-            deleteVariant.type = "button";
-            deleteVariant.className = "icon-button danger";
-            deleteVariant.title = `Remove ${caseKey} plural`;
-            deleteVariant.textContent = "×";
-            deleteVariant.addEventListener("click", async () => {
-              if (!activeKey) {
-                setStatus("Set a key before removing plural forms", true);
-                return;
-              }
-              const updates = { plural: {} };
-              updates.plural[caseKey] = { value: null };
-              try {
-                await upsertTranslation(
-                  {
-                    key: activeKey,
-                    language: state.currentLanguage,
-                    variations: updates,
-                  },
-                  `Plural '${caseKey}' removed`,
-                );
-                dropDraft(item.__draftId);
-                await fetchTranslations(
-                  document.getElementById("search").value,
-                );
-              } catch (error) {
-                setStatus(error.message, true);
-              }
-            });
-            rowContent.appendChild(deleteVariant);
+            translationDetails.appendChild(pluralList);
+            translationDetailsHasContent = true;
+          }
 
-            row.appendChild(rowContent);
-            pluralList.appendChild(row);
-          });
-
-          translationWrapper.appendChild(pluralList);
-
-          // Add plural button and picker to key tools
-          const availableCases = PLURAL_CASES.filter(
+          const availablePluralCases = PLURAL_CASES.filter(
             (caseKey) => !pluralKeys.includes(caseKey),
           );
-
-          if (availableCases.length > 0) {
+          const keyToolsContainer = keyDetails.querySelector(".key-tools");
+          if (keyToolsContainer && availablePluralCases.length) {
             const addPluralBtn = document.createElement("button");
             addPluralBtn.type = "button";
             addPluralBtn.className = "icon-button";
@@ -1481,14 +2291,13 @@
               picker.classList.toggle("hidden");
             });
 
-            // Close picker when clicking elsewhere
-            document.addEventListener("click", (e) => {
-              if (!keyTools.contains(e.target)) {
+            document.addEventListener("click", (event) => {
+              if (!keyTools.contains(event.target)) {
                 picker.classList.add("hidden");
               }
             });
 
-            availableCases.forEach((caseKey) => {
+            availablePluralCases.forEach((caseKey) => {
               const optionBtn = document.createElement("button");
               optionBtn.type = "button";
               optionBtn.className = "plural-option";
@@ -1511,7 +2320,7 @@
                     `Plural '${caseKey}' added`,
                   );
                   picker.classList.add("hidden");
-                  dropDraft(item.__draftId);
+                  captureScrollPosition();
                   await fetchTranslations(
                     document.getElementById("search").value,
                   );
@@ -1522,15 +2331,738 @@
               picker.appendChild(optionBtn);
             });
 
-            keyTools.appendChild(addPluralBtn);
-            keyTools.appendChild(picker);
+            keyToolsContainer.appendChild(addPluralBtn);
+            keyToolsContainer.appendChild(picker);
+          }
+
+          const addSubstitutionBtn = document.createElement("button");
+          addSubstitutionBtn.type = "button";
+          addSubstitutionBtn.className = "icon-button add-substitution-button";
+          addSubstitutionBtn.textContent = "＋ Substitution";
+          addSubstitutionBtn.title = "Add substitution";
+          addSubstitutionBtn.addEventListener("click", async () => {
+            if (!state.currentLanguage) {
+              setStatus("Select a language before adding substitutions", true);
+              return;
+            }
+            if (!activeKey) {
+              setStatus("Set a key before adding substitutions", true);
+              return;
+            }
+            const newKey = prompt("Enter substitution key");
+            if (!newKey) {
+              return;
+            }
+            try {
+              await updateSubstitution(
+                activeKey,
+                newKey,
+                { value: "" },
+                "Substitution added",
+              );
+              captureScrollPosition();
+              await fetchTranslations(
+                document.getElementById("search").value || "",
+              );
+            } catch (error) {
+              setStatus(error.message, true);
+            }
+          });
+          if (keyToolsContainer) {
+            keyToolsContainer.appendChild(addSubstitutionBtn);
+          }
+
+          const substitutionsAdded = renderSubstitutions({
+            container: translationDetails,
+            translation,
+            activeKey,
+            isDraft,
+          });
+          if (substitutionsAdded) {
+            translationDetailsHasContent = true;
+          }
+
+          if (translationDetailsHasContent) {
+            translationWrapper.appendChild(translationDetails);
           }
 
           translationCell.appendChild(translationWrapper);
           tr.appendChild(translationCell);
 
+          applyRowStateStyles(tr, translation.state);
+          syncExpansion();
+
           tbody.appendChild(tr);
         });
+
+        Array.from(expandedRows).forEach((id) => {
+          if (!seenRowIds.has(id)) {
+            expandedRows.delete(id);
+          }
+        });
+
+        restoreScrollPositionIfNeeded();
+      }
+
+      async function updateTranslationState(key, language, nextState) {
+        if (!language) {
+          throw new Error("Select a language before updating state");
+        }
+        if (SAMPLE_MODE) {
+          const target = sampleStore.items.find((item) => item.key === key);
+          if (!target) {
+            throw new Error("Key not found in sample data");
+          }
+          const translation = target.translations[language] || {};
+          translation.state = nextState;
+          target.translations[language] = translation;
+          setStatus("Translation state updated");
+          return;
+        }
+
+        await upsertTranslation(
+          { key, language, state: nextState },
+          "Translation state updated",
+        );
+      }
+
+      async function updateExtractionState(key, extractionState) {
+        if (SAMPLE_MODE) {
+          const target = sampleStore.items.find((item) => item.key === key);
+          if (!target) {
+            throw new Error("Key not found in sample data");
+          }
+          target.extractionState = extractionState || null;
+          setStatus("Extraction state updated");
+          return;
+        }
+        if (!state.currentPath) {
+          throw new Error("Select a file before updating extraction state");
+        }
+        const res = await fetch("/api/extraction-state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key,
+            extractionState: extractionState,
+            path: state.currentPath,
+          }),
+        });
+        if (!res.ok) {
+          let message = `Failed to update extraction state (${res.status})`;
+          try {
+            const err = await res.json();
+            if (err?.error) {
+              message = err.error;
+            }
+          } catch (_) {
+            // ignore
+          }
+          throw new Error(message);
+        }
+        setStatus("Extraction state updated");
+      }
+
+      function mergeSubstitution(existing, patch) {
+        const result = { ...existing };
+        if (patch === null) {
+          return null;
+        }
+        if (patch.value !== undefined) {
+          result.value = patch.value;
+        }
+        if (patch.state !== undefined) {
+          result.state = patch.state;
+        }
+        if (patch.argNum !== undefined) {
+          result.argNum = patch.argNum;
+        }
+        if (patch.formatSpecifier !== undefined) {
+          result.formatSpecifier = patch.formatSpecifier;
+        }
+        if (patch.variations !== undefined) {
+          result.variations = result.variations || {};
+          Object.entries(patch.variations).forEach(([selector, cases]) => {
+            result.variations[selector] = {
+              ...(result.variations[selector] || {}),
+              ...cases,
+            };
+          });
+        }
+        if (patch.substitutions !== undefined) {
+          result.substitutions = result.substitutions || {};
+          Object.entries(patch.substitutions).forEach(([name, nested]) => {
+            if (nested === null) {
+              delete result.substitutions[name];
+              return;
+            }
+            const merged = mergeSubstitution(
+              result.substitutions[name] || {},
+              nested,
+            );
+            if (merged === null) {
+              delete result.substitutions[name];
+            } else {
+              result.substitutions[name] = merged;
+            }
+          });
+        }
+        if (patch.args !== undefined) {
+          if (patch.args === null) {
+            delete result.args;
+          } else {
+            result.args = patch.args;
+          }
+        }
+        if (pruneSubstitutionInPlace(result)) {
+          return null;
+        }
+        return result;
+      }
+
+      async function updateSubstitution(
+        key,
+        substitutionKey,
+        patch,
+        successMessage,
+      ) {
+        if (!state.currentLanguage) {
+          throw new Error("Select a language before editing substitutions");
+        }
+        if (SAMPLE_MODE) {
+          const target = sampleStore.items.find((item) => item.key === key);
+          if (!target) {
+            throw new Error("Key not found in sample data");
+          }
+          const translation = target.translations[state.currentLanguage] || {};
+          translation.substitutions = translation.substitutions || {};
+          if (patch === null) {
+            delete translation.substitutions[substitutionKey];
+          } else {
+            const merged = mergeSubstitution(
+              translation.substitutions[substitutionKey] || {},
+              patch,
+            );
+            if (merged === null) {
+              delete translation.substitutions[substitutionKey];
+            } else {
+              translation.substitutions[substitutionKey] = merged;
+            }
+          }
+          if (
+            translation.substitutions &&
+            Object.keys(translation.substitutions).length === 0
+          ) {
+            delete translation.substitutions;
+          }
+          if (pruneTranslationInPlace(translation)) {
+            delete target.translations[state.currentLanguage];
+          } else {
+            target.translations[state.currentLanguage] = translation;
+          }
+          setStatus(successMessage);
+          return;
+        }
+
+        captureScrollPosition();
+        await upsertTranslation(
+          {
+            key,
+            language: state.currentLanguage,
+            substitutions: {
+              [substitutionKey]: patch,
+            },
+          },
+          successMessage,
+        );
+      }
+
+      function renderSubstitutions({
+        container,
+        translation,
+        activeKey,
+        isDraft,
+      }) {
+        if (!activeKey || isDraft) {
+          return false;
+        }
+        const substitutions = translation.substitutions || {};
+        const subKeys = Object.keys(substitutions);
+        if (!subKeys.length) {
+          return false;
+        }
+
+        const panel = document.createElement("details");
+        panel.className = "substitutions-panel";
+        panel.open = subKeys.length <= 3;
+
+        const summary = document.createElement("summary");
+        summary.className = "substitutions-summary";
+        summary.textContent =
+          subKeys.length === 1
+            ? "Substitution"
+            : `Substitutions (${subKeys.length})`;
+        panel.appendChild(summary);
+
+        const section = document.createElement("div");
+        section.className = "substitutions-section";
+        panel.appendChild(section);
+
+        subKeys.forEach((subKey) => {
+          const substitution = substitutions[subKey] || {};
+          const block = document.createElement("div");
+          block.className = "substitution-block";
+
+          const subHeader = document.createElement("div");
+          subHeader.className = "substitution-header";
+
+          const name = document.createElement("strong");
+          name.textContent = subKey;
+          subHeader.appendChild(name);
+
+          const headerActions = document.createElement("div");
+          headerActions.className = "substitution-actions";
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "icon-button danger";
+          removeBtn.textContent = "×";
+          removeBtn.title = "Remove substitution";
+          removeBtn.addEventListener("click", async () => {
+            if (!activeKey) {
+              return;
+            }
+            try {
+              await updateSubstitution(
+                activeKey,
+                subKey,
+                null,
+                "Substitution removed",
+              );
+              captureScrollPosition();
+              await fetchTranslations(
+                document.getElementById("search").value || "",
+              );
+            } catch (error) {
+              setStatus(error.message, true);
+            }
+          });
+          headerActions.appendChild(removeBtn);
+          subHeader.appendChild(headerActions);
+          block.appendChild(subHeader);
+
+          const fields = document.createElement("div");
+          fields.className = "substitution-fields";
+
+          const argNumInput = document.createElement("input");
+          argNumInput.type = "number";
+          argNumInput.placeholder = "argNum";
+          if (
+            substitution.argNum !== undefined &&
+            substitution.argNum !== null
+          ) {
+            argNumInput.value = substitution.argNum;
+          }
+          argNumInput.addEventListener("change", async (event) => {
+            const value =
+              event.target.value === "" ? null : Number(event.target.value);
+            try {
+              await updateSubstitution(
+                activeKey,
+                subKey,
+                { argNum: value },
+                "Argument index saved",
+              );
+            } catch (error) {
+              setStatus(error.message, true);
+              if (
+                substitution.argNum !== undefined &&
+                substitution.argNum !== null
+              ) {
+                event.target.value = substitution.argNum;
+              } else {
+                event.target.value = "";
+              }
+            }
+          });
+          fields.appendChild(argNumInput);
+
+          const formatInput = document.createElement("input");
+          formatInput.type = "text";
+          formatInput.placeholder = "formatSpecifier";
+          formatInput.value = substitution.formatSpecifier || "";
+          formatInput.addEventListener("change", async (event) => {
+            const value = event.target.value || null;
+            try {
+              await updateSubstitution(
+                activeKey,
+                subKey,
+                { formatSpecifier: value },
+                "Format specifier saved",
+              );
+            } catch (error) {
+              setStatus(error.message, true);
+              event.target.value = substitution.formatSpecifier || "";
+            }
+          });
+          fields.appendChild(formatInput);
+
+          const stateGroup = document.createElement("div");
+          stateGroup.className = "state-options compact";
+          const syncState = () => {
+            const current = substitution.state || "";
+            stateGroup.querySelectorAll("label.state-pill").forEach((pill) => {
+              const radio = pill.querySelector('input[type="radio"]');
+              const value = radio.value || "";
+              const active = value === current;
+              radio.checked = active;
+              pill.classList.toggle("active", active);
+            });
+          };
+          const stateGroupName = `substitution-state-${activeKey}-${subKey}`;
+          TRANSLATION_STATES.forEach((option) => {
+            const normalized = option || "";
+            const pill = document.createElement("label");
+            pill.className = "state-pill";
+
+            const radio = document.createElement("input");
+            radio.type = "radio";
+            radio.name = stateGroupName;
+            radio.value = normalized;
+            if ((substitution.state || "") === normalized) {
+              radio.checked = true;
+              pill.classList.add("active");
+            }
+            radio.addEventListener("change", async () => {
+              if (!radio.checked) {
+                return;
+              }
+              const previous = substitution.state || "";
+              const next = normalized || null;
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  { state: next },
+                  "Substitution state saved",
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+                substitution.state = previous ? previous : null;
+              }
+              substitution.state = next;
+              syncState();
+            });
+
+            const label = document.createElement("span");
+            label.textContent = translationStateLabel(normalized);
+
+            pill.appendChild(radio);
+            pill.appendChild(label);
+            stateGroup.appendChild(pill);
+          });
+          syncState();
+          fields.appendChild(stateGroup);
+
+          const valueTextarea = document.createElement("textarea");
+          valueTextarea.rows = 1;
+          valueTextarea.value = substitution.value || "";
+          valueTextarea.addEventListener("change", async (event) => {
+            try {
+              await updateSubstitution(
+                activeKey,
+                subKey,
+                { value: event.target.value },
+                "Substitution value saved",
+              );
+            } catch (error) {
+              setStatus(error.message, true);
+              valueTextarea.value = substitution.value || "";
+            }
+          });
+          fields.appendChild(valueTextarea);
+          requestAnimationFrame(() => initAutoResize(valueTextarea));
+
+          block.appendChild(fields);
+
+          renderSubstitutionVariations({
+            container: block,
+            substitution,
+            activeKey,
+            subKey,
+          });
+
+          section.appendChild(block);
+        });
+
+        container.appendChild(panel);
+        return true;
+      }
+
+      function renderSubstitutionVariations({
+        container,
+        substitution,
+        activeKey,
+        subKey,
+      }) {
+        const variations = substitution.variations || {};
+        const selectors = Object.keys(variations);
+        const wrapper = document.createElement("div");
+        wrapper.className = "variation-section";
+        let hasContent = false;
+
+        const attachCasePicker = (trigger, selector, existingCases) => {
+          const available = availableVariationCases(selector, existingCases);
+          if (!available.length) {
+            return null;
+          }
+          const picker = document.createElement("div");
+          picker.className = "variation-picker hidden";
+
+          available.forEach((caseKey) => {
+            const optionBtn = document.createElement("button");
+            optionBtn.type = "button";
+            optionBtn.className = "variation-option";
+            optionBtn.textContent = caseKey;
+            optionBtn.addEventListener("click", async () => {
+              if (!activeKey) {
+                picker.classList.add("hidden");
+                return;
+              }
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  {
+                    variations: {
+                      [selector]: {
+                        [caseKey]: { value: "" },
+                      },
+                    },
+                  },
+                  `Added ${selector} case '${caseKey}'`,
+                );
+                picker.classList.add("hidden");
+                captureScrollPosition();
+                await fetchTranslations(
+                  document.getElementById("search").value || "",
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+              }
+            });
+            picker.appendChild(optionBtn);
+          });
+
+          trigger.addEventListener("click", (event) => {
+            event.stopPropagation();
+            picker.classList.toggle("hidden");
+          });
+
+          document.addEventListener("click", (event) => {
+            if (!trigger.contains(event.target)) {
+              picker.classList.add("hidden");
+            }
+          });
+
+          return picker;
+        };
+
+        selectors.forEach((selector) => {
+          const cases = variations[selector] || {};
+          const caseKeys = Object.keys(cases);
+          const variationBlock = document.createElement("div");
+          variationBlock.className = "variation-block";
+
+          const header = document.createElement("div");
+          header.className = "variation-header";
+          const heading = document.createElement("span");
+          heading.className = "meta-label";
+          heading.textContent = `${variationLabel(selector)} variations`;
+          header.appendChild(heading);
+
+          const actions = document.createElement("div");
+          actions.className = "variation-actions";
+          const addCaseBtn = document.createElement("button");
+          addCaseBtn.type = "button";
+          addCaseBtn.className = "icon-button";
+          addCaseBtn.textContent = `＋ ${variationLabel(selector)}`;
+          const actionItem = document.createElement("div");
+          actionItem.className = "variation-action";
+          actionItem.appendChild(addCaseBtn);
+
+          const picker = attachCasePicker(addCaseBtn, selector, caseKeys);
+          if (picker) {
+            actionItem.appendChild(picker);
+          } else {
+            addCaseBtn.addEventListener("click", async () => {
+              const caseName = prompt(`Enter ${selector} case name to add`);
+              const normalizedCase = (caseName || "").trim();
+              if (!normalizedCase) {
+                return;
+              }
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  {
+                    variations: {
+                      [selector]: {
+                        [normalizedCase]: { value: "" },
+                      },
+                    },
+                  },
+                  `Added ${selector} case '${normalizedCase}'`,
+                );
+                captureScrollPosition();
+                await fetchTranslations(
+                  document.getElementById("search").value || "",
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+              }
+            });
+          }
+          if (actionItem.childElementCount) {
+            actions.appendChild(actionItem);
+            variationBlock.appendChild(actions);
+          }
+
+          const casesContainer = document.createElement("div");
+          casesContainer.className = "variation-cases";
+
+          caseKeys.forEach((caseKey) => {
+            const entry = cases[caseKey] || {};
+            const caseRow = document.createElement("div");
+            caseRow.className = "variation-row";
+
+            const label = document.createElement("span");
+            label.className = "variation-case-label";
+            label.textContent = caseKey;
+            caseRow.appendChild(label);
+
+            const rowContent = document.createElement("div");
+            rowContent.className = "variation-row-content";
+
+            const input = document.createElement("textarea");
+            input.rows = 1;
+            input.value = entry.value || "";
+            input.addEventListener("change", async (event) => {
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  {
+                    variations: {
+                      [selector]: {
+                        [caseKey]: { value: event.target.value },
+                      },
+                    },
+                  },
+                  `${variationLabel(selector)} '${caseKey}' saved`,
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+                input.value = entry.value || "";
+              }
+            });
+            rowContent.appendChild(input);
+            requestAnimationFrame(() => initAutoResize(input));
+
+            const deleteBtn = document.createElement("button");
+            deleteBtn.type = "button";
+            deleteBtn.className = "icon-button danger";
+            deleteBtn.textContent = "×";
+            deleteBtn.title = `Remove ${selector} case ${caseKey}`;
+            deleteBtn.addEventListener("click", async () => {
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  {
+                    variations: {
+                      [selector]: {
+                        [caseKey]: { value: null },
+                      },
+                    },
+                  },
+                  `${variationLabel(selector)} '${caseKey}' removed`,
+                );
+                captureScrollPosition();
+                await fetchTranslations(
+                  document.getElementById("search").value || "",
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+              }
+            });
+            rowContent.appendChild(deleteBtn);
+
+            caseRow.appendChild(rowContent);
+            casesContainer.appendChild(caseRow);
+          });
+
+          variationBlock.appendChild(casesContainer);
+          wrapper.appendChild(variationBlock);
+          hasContent = true;
+        });
+
+        const addRow = document.createElement("div");
+        addRow.className = "variation-add-row";
+        Object.keys(VARIATION_SELECTORS).forEach((selector) => {
+          const existingCases = Object.keys(variations[selector] || {});
+          const addBtn = document.createElement("button");
+          addBtn.type = "button";
+          addBtn.className = "icon-button";
+          addBtn.textContent = `＋ ${variationLabel(selector)}`;
+          const addWrapper = document.createElement("div");
+          addWrapper.className = "variation-action";
+          addWrapper.appendChild(addBtn);
+          const picker = attachCasePicker(addBtn, selector, existingCases);
+          if (picker) {
+            addWrapper.appendChild(picker);
+          } else {
+            addBtn.addEventListener("click", async () => {
+              const caseName = prompt(`Enter ${selector} case name to add`);
+              const normalizedCase = (caseName || "").trim();
+              if (!normalizedCase) {
+                return;
+              }
+              try {
+                await updateSubstitution(
+                  activeKey,
+                  subKey,
+                  {
+                    variations: {
+                      [selector]: {
+                        [normalizedCase]: { value: "" },
+                      },
+                    },
+                  },
+                  `Added ${selector} case '${normalizedCase}'`,
+                );
+                captureScrollPosition();
+                await fetchTranslations(
+                  document.getElementById("search").value || "",
+                );
+              } catch (error) {
+                setStatus(error.message, true);
+              }
+            });
+          }
+          addRow.appendChild(addWrapper);
+        });
+
+        if (addRow.childElementCount) {
+          wrapper.appendChild(addRow);
+          hasContent = true;
+        }
+
+        if (!hasContent) {
+          return;
+        }
+
+        container.appendChild(wrapper);
       }
 
       async function upsertTranslation(
@@ -1559,14 +3091,51 @@
           }
           if (payload.variations !== undefined) {
             translation.variations = translation.variations || {};
-            if (payload.variations.plural) {
-              translation.variations.plural = {
-                ...(translation.variations.plural || {}),
-                ...payload.variations.plural,
+            Object.entries(payload.variations).forEach(([selector, cases]) => {
+              translation.variations[selector] = {
+                ...(translation.variations[selector] || {}),
+                ...cases,
               };
+            });
+          }
+          if (payload.substitutions !== undefined) {
+            translation.substitutions = translation.substitutions || {};
+            Object.entries(payload.substitutions).forEach(([name, patch]) => {
+              if (patch === null) {
+                delete translation.substitutions[name];
+                return;
+              }
+              const merged = mergeSubstitution(
+                translation.substitutions[name] || {},
+                patch,
+              );
+              if (merged === null) {
+                delete translation.substitutions[name];
+              } else {
+                translation.substitutions[name] = merged;
+              }
+            });
+          }
+          if (payload.args !== undefined) {
+            if (payload.args === null) {
+              delete translation.args;
+            } else {
+              translation.args = payload.args;
             }
           }
-          target.translations[language] = translation;
+
+          if (
+            translation.substitutions &&
+            Object.keys(translation.substitutions).length === 0
+          ) {
+            delete translation.substitutions;
+          }
+
+          if (pruneTranslationInPlace(translation)) {
+            delete target.translations[language];
+          } else {
+            target.translations[language] = translation;
+          }
           setStatus(successMessage);
           return;
         }
@@ -1584,6 +3153,12 @@
         }
         if (payload.variations !== undefined) {
           body.variations = payload.variations;
+        }
+        if (payload.substitutions !== undefined) {
+          body.substitutions = payload.substitutions;
+        }
+        if (payload.args !== undefined) {
+          body.args = payload.args;
         }
 
         const res = await fetch("/api/translations", {
@@ -1738,9 +3313,11 @@
             __draftId: draftId,
             key: "",
             comment: "",
+            extractionState: null,
             translations: {},
           };
           state.drafts.unshift(draft);
+          expandedRows.add(draftId);
           renderTable();
           window.requestAnimationFrame(() => {
             const input = document.querySelector(

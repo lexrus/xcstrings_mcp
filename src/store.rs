@@ -40,6 +40,8 @@ pub struct XcStringsFile {
 pub struct XcStringEntry {
     #[serde(rename = "localizations", default)]
     pub localizations: BTreeMap<String, XcLocalization>,
+    #[serde(rename = "extractionState", default)]
+    pub extraction_state: Option<String>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -50,6 +52,28 @@ pub struct XcLocalization {
     pub string_unit: Option<XcStringUnit>,
     #[serde(rename = "variations", default)]
     pub variations: BTreeMap<String, BTreeMap<String, XcLocalization>>, // nesting mirrors xcstrings schema
+    #[serde(rename = "substitutions", default)]
+    pub substitutions: BTreeMap<String, XcSubstitution>,
+    #[serde(rename = "args", default)]
+    pub args: Option<Vec<Value>>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct XcSubstitution {
+    #[serde(rename = "stringUnit", default)]
+    pub string_unit: Option<XcStringUnit>,
+    #[serde(rename = "variations", default)]
+    pub variations: BTreeMap<String, BTreeMap<String, XcLocalization>>,
+    #[serde(rename = "substitutions", default)]
+    pub substitutions: BTreeMap<String, XcSubstitution>,
+    #[serde(rename = "args", default)]
+    pub args: Option<Vec<Value>>,
+    #[serde(rename = "argNum", default)]
+    pub arg_num: Option<i64>,
+    #[serde(rename = "formatSpecifier", default)]
+    pub format_specifier: Option<String>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -70,6 +94,10 @@ pub struct TranslationValue {
     pub state: Option<String>,
     #[serde(default)]
     pub variations: BTreeMap<String, BTreeMap<String, TranslationValue>>,
+    #[serde(default)]
+    pub substitutions: BTreeMap<String, SubstitutionValue>,
+    #[serde(default)]
+    pub args: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -78,6 +106,42 @@ pub struct TranslationUpdate {
     pub state: Option<Option<String>>,
     #[serde(default)]
     pub variations: Option<BTreeMap<String, BTreeMap<String, TranslationUpdate>>>,
+    #[serde(default)]
+    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdate>>>,
+    #[serde(default)]
+    pub args: Option<Option<Vec<Value>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubstitutionValue {
+    pub value: Option<String>,
+    pub state: Option<String>,
+    #[serde(rename = "argNum", skip_serializing_if = "Option::is_none")]
+    pub arg_num: Option<i64>,
+    #[serde(rename = "formatSpecifier", skip_serializing_if = "Option::is_none")]
+    pub format_specifier: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variations: BTreeMap<String, BTreeMap<String, TranslationValue>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub substitutions: BTreeMap<String, SubstitutionValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<Value>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SubstitutionUpdate {
+    pub value: Option<Option<String>>,
+    pub state: Option<Option<String>>,
+    #[serde(rename = "argNum", default)]
+    pub arg_num: Option<Option<i64>>,
+    #[serde(rename = "formatSpecifier", default)]
+    pub format_specifier: Option<Option<String>>,
+    #[serde(default)]
+    pub variations: Option<BTreeMap<String, BTreeMap<String, TranslationUpdate>>>,
+    #[serde(default)]
+    pub substitutions: Option<BTreeMap<String, Option<SubstitutionUpdate>>>,
+    #[serde(default)]
+    pub args: Option<Option<Vec<Value>>>,
 }
 
 impl TranslationValue {
@@ -97,11 +161,18 @@ impl TranslationValue {
                 (selector.clone(), converted)
             })
             .collect();
+        let substitutions = loc
+            .substitutions
+            .iter()
+            .map(|(name, sub)| (name.clone(), SubstitutionValue::from_substitution(sub)))
+            .collect();
 
         TranslationValue {
             value,
             state,
             variations,
+            substitutions,
+            args: loc.args.clone(),
         }
     }
 }
@@ -112,6 +183,8 @@ impl TranslationUpdate {
             value: Some(value),
             state: Some(state),
             variations: None,
+            substitutions: None,
+            args: None,
         }
     }
 
@@ -138,12 +211,49 @@ impl TranslationUpdate {
     }
 }
 
+impl SubstitutionValue {
+    fn from_substitution(sub: &XcSubstitution) -> Self {
+        let value = sub.string_unit.as_ref().and_then(|unit| unit.value.clone());
+        let state = sub.string_unit.as_ref().and_then(|unit| unit.state.clone());
+        let variations = sub
+            .variations
+            .iter()
+            .map(|(selector, cases)| {
+                let converted = cases
+                    .iter()
+                    .map(|(case, nested)| {
+                        (case.clone(), TranslationValue::from_localization(nested))
+                    })
+                    .collect();
+                (selector.clone(), converted)
+            })
+            .collect();
+        let substitutions = sub
+            .substitutions
+            .iter()
+            .map(|(name, nested)| (name.clone(), SubstitutionValue::from_substitution(nested)))
+            .collect();
+
+        SubstitutionValue {
+            value,
+            state,
+            arg_num: sub.arg_num,
+            format_specifier: sub.format_specifier.clone(),
+            variations,
+            substitutions,
+            args: sub.args.clone(),
+        }
+    }
+}
+
 impl From<TranslationValue> for TranslationUpdate {
     fn from(value: TranslationValue) -> Self {
         let mut update = TranslationUpdate {
             value: Some(value.value),
             state: Some(value.state),
             variations: None,
+            substitutions: None,
+            args: Some(value.args),
         };
 
         if !value.variations.is_empty() {
@@ -159,6 +269,63 @@ impl From<TranslationValue> for TranslationUpdate {
                 })
                 .collect();
             update.variations = Some(nested);
+        }
+
+        if !value.substitutions.is_empty() {
+            let nested = value
+                .substitutions
+                .into_iter()
+                .map(|(name, sub)| (name, Some(SubstitutionUpdate::from(sub))))
+                .collect();
+            update.substitutions = Some(nested);
+        }
+
+        update
+    }
+}
+
+impl From<SubstitutionValue> for SubstitutionUpdate {
+    fn from(value: SubstitutionValue) -> Self {
+        let SubstitutionValue {
+            value: base_value,
+            state,
+            arg_num,
+            format_specifier,
+            variations,
+            substitutions,
+            args,
+        } = value;
+
+        let mut update = SubstitutionUpdate {
+            value: Some(base_value),
+            state: Some(state),
+            arg_num: Some(arg_num),
+            format_specifier: Some(format_specifier),
+            variations: None,
+            substitutions: None,
+            args: Some(args),
+        };
+
+        if !variations.is_empty() {
+            let nested = variations
+                .into_iter()
+                .map(|(selector, cases)| {
+                    let cases = cases
+                        .into_iter()
+                        .map(|(case, inner)| (case, TranslationUpdate::from(inner)))
+                        .collect();
+                    (selector, cases)
+                })
+                .collect();
+            update.variations = Some(nested);
+        }
+
+        if !substitutions.is_empty() {
+            let nested = substitutions
+                .into_iter()
+                .map(|(name, sub)| (name, Some(SubstitutionUpdate::from(sub))))
+                .collect();
+            update.substitutions = Some(nested);
         }
 
         update
@@ -212,6 +379,143 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
         // re-add untouched selectors
         target.variations.extend(existing_variations);
     }
+
+    if let Some(substitutions) = update.substitutions {
+        let mut existing_substitutions = std::mem::take(&mut target.substitutions);
+
+        for (name, maybe_update) in substitutions {
+            match maybe_update {
+                Some(sub_update) => {
+                    let mut substitution = existing_substitutions
+                        .remove(&name)
+                        .unwrap_or_else(XcSubstitution::default);
+                    apply_substitution_update(&mut substitution, sub_update);
+
+                    if !substitution_is_empty(&substitution) {
+                        target.substitutions.insert(name, substitution);
+                    }
+                }
+                None => {
+                    existing_substitutions.remove(&name);
+                }
+            }
+        }
+
+        target.substitutions.extend(existing_substitutions);
+    }
+
+    if let Some(args) = update.args {
+        target.args = args;
+    }
+}
+
+fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUpdate) {
+    let mut unit = target.string_unit.clone().unwrap_or_default();
+
+    if let Some(value) = update.value {
+        unit.value = value;
+    }
+
+    if let Some(state) = update.state {
+        unit.state = state;
+    }
+
+    if unit.value.is_some() || unit.state.is_some() || !unit.extra.is_empty() {
+        target.string_unit = Some(unit);
+    } else {
+        target.string_unit = None;
+    }
+
+    if let Some(arg_num) = update.arg_num {
+        target.arg_num = arg_num;
+    }
+
+    if let Some(format_specifier) = update.format_specifier {
+        target.format_specifier = format_specifier;
+    }
+
+    if let Some(variations) = update.variations {
+        let mut existing_variations = std::mem::take(&mut target.variations);
+
+        for (selector, cases_update) in variations {
+            let mut selector_entry = existing_variations.remove(&selector).unwrap_or_default();
+
+            for (case_key, nested_update) in cases_update {
+                let mut nested_loc = selector_entry
+                    .remove(&case_key)
+                    .unwrap_or_else(XcLocalization::default);
+                apply_update(&mut nested_loc, nested_update);
+
+                if nested_loc.string_unit.is_none()
+                    && nested_loc.variations.is_empty()
+                    && nested_loc.substitutions.is_empty()
+                    && nested_loc
+                        .args
+                        .as_ref()
+                        .map(|value| value.is_empty())
+                        .unwrap_or(true)
+                    && nested_loc.extra.is_empty()
+                {
+                    continue;
+                }
+
+                selector_entry.insert(case_key, nested_loc);
+            }
+
+            if !selector_entry.is_empty() {
+                target.variations.insert(selector, selector_entry);
+            }
+        }
+
+        target.variations.extend(existing_variations);
+    }
+
+    if let Some(substitutions) = update.substitutions {
+        let mut existing_substitutions = std::mem::take(&mut target.substitutions);
+
+        for (name, maybe_update) in substitutions {
+            match maybe_update {
+                Some(sub_update) => {
+                    let mut nested = existing_substitutions
+                        .remove(&name)
+                        .unwrap_or_else(XcSubstitution::default);
+                    apply_substitution_update(&mut nested, sub_update);
+                    if !substitution_is_empty(&nested) {
+                        target.substitutions.insert(name, nested);
+                    }
+                }
+                None => {
+                    existing_substitutions.remove(&name);
+                }
+            }
+        }
+
+        target.substitutions.extend(existing_substitutions);
+    }
+
+    if let Some(args) = update.args {
+        target.args = args;
+    }
+}
+
+fn substitution_is_empty(sub: &XcSubstitution) -> bool {
+    let string_unit_empty = sub
+        .string_unit
+        .as_ref()
+        .map(|unit| unit.value.is_none() && unit.state.is_none() && unit.extra.is_empty())
+        .unwrap_or(true);
+
+    string_unit_empty
+        && sub.variations.is_empty()
+        && sub.substitutions.is_empty()
+        && sub
+            .args
+            .as_ref()
+            .map(|value| value.is_empty())
+            .unwrap_or(true)
+        && sub.arg_num.is_none()
+        && sub.format_specifier.is_none()
+        && sub.extra.is_empty()
 }
 
 fn localization_contains(loc: &XcLocalization, query: &str) -> bool {
@@ -229,13 +533,63 @@ fn localization_contains(loc: &XcLocalization, query: &str) -> bool {
         cases
             .values()
             .any(|nested| localization_contains(nested, query))
-    })
+    }) || loc
+        .substitutions
+        .values()
+        .any(|sub| substitution_contains(sub, query))
+        || loc
+            .args
+            .as_ref()
+            .map(|args| {
+                args.iter().any(|value| {
+                    value
+                        .as_str()
+                        .map(|s| s.to_lowercase().contains(query))
+                        .unwrap_or_else(|| value.to_string().to_lowercase().contains(query))
+                })
+            })
+            .unwrap_or(false)
+}
+
+fn substitution_contains(sub: &XcSubstitution, query: &str) -> bool {
+    if sub
+        .string_unit
+        .as_ref()
+        .and_then(|unit| unit.value.as_ref())
+        .map(|value| value.to_lowercase().contains(query))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    sub.variations.values().any(|cases| {
+        cases
+            .values()
+            .any(|nested| localization_contains(nested, query))
+    }) || sub
+        .substitutions
+        .values()
+        .any(|nested| substitution_contains(nested, query))
+        || sub
+            .args
+            .as_ref()
+            .map(|args| {
+                args.iter().any(|value| {
+                    value
+                        .as_str()
+                        .map(|s| s.to_lowercase().contains(query))
+                        .unwrap_or_else(|| value.to_string().to_lowercase().contains(query))
+                })
+            })
+            .unwrap_or(false)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslationRecord {
     pub key: String,
     pub comment: Option<String>,
+    #[serde(rename = "extractionState")]
+    pub extraction_state: Option<String>,
     pub translations: BTreeMap<String, TranslationValue>,
 }
 
@@ -499,6 +853,7 @@ impl XcStringsStore {
                 Some(TranslationRecord {
                     key: key.clone(),
                     comment,
+                    extraction_state: entry.extraction_state.clone(),
                     translations,
                 })
             })
@@ -531,7 +886,7 @@ impl XcStringsStore {
                 let has_variations = entry
                     .localizations
                     .values()
-                    .any(|loc| !loc.variations.is_empty());
+                    .any(|loc| !loc.variations.is_empty() || !loc.substitutions.is_empty());
 
                 Some(TranslationSummary {
                     key: key.clone(),
@@ -639,6 +994,24 @@ impl XcStringsStore {
             .ok_or_else(|| StoreError::KeyMissing(old_key.to_string()))?;
 
         doc.strings.insert(new_key.to_string(), entry);
+
+        let serialized = serde_json::to_string_pretty(&*doc)?;
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
+    }
+
+    pub async fn set_extraction_state(
+        &self,
+        key: &str,
+        state: Option<String>,
+    ) -> Result<(), StoreError> {
+        let mut doc = self.data.write().await;
+        let entry = doc
+            .strings
+            .entry(key.to_string())
+            .or_insert_with(XcStringEntry::default);
+        entry.extraction_state = state;
 
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
@@ -852,6 +1225,84 @@ mod tests {
             .expect("clear comment");
         let records = store.list_records(None).await;
         assert!(records[0].comment.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_extraction_state_round_trip() {
+        let tmp = TempStorePath::new("extraction_state_round_trip");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .set_extraction_state("welcome", Some("manual".into()))
+            .await
+            .expect("set extraction state");
+
+        let records = store.list_records(None).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].extraction_state.as_deref(), Some("manual"));
+
+        store
+            .set_extraction_state("welcome", None)
+            .await
+            .expect("clear extraction state");
+        let records = store.list_records(None).await;
+        assert!(records[0].extraction_state.is_none());
+    }
+
+    #[tokio::test]
+    async fn substitution_updates_round_trip() {
+        let tmp = TempStorePath::new("substitution_round_trip");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        let mut update = TranslationUpdate::default();
+        update.value = Some(Some("Found %#@arg1@".into()));
+        let mut substitutions = BTreeMap::new();
+        let mut substitution = SubstitutionUpdate::default();
+        substitution.value = Some(Some("%arg item".into()));
+        substitution.arg_num = Some(Some(1));
+        substitution.format_specifier = Some(Some("ld".into()));
+        substitutions.insert("arg1".to_string(), Some(substitution));
+        update.substitutions = Some(substitutions);
+
+        store
+            .upsert_translation("message", "en", update)
+            .await
+            .expect("upsert substitution");
+
+        let en_translation = store
+            .get_translation("message", "en")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        let arg1 = en_translation
+            .substitutions
+            .get("arg1")
+            .expect("substitution present");
+        assert_eq!(arg1.value.as_deref(), Some("%arg item"));
+        assert_eq!(arg1.arg_num, Some(1));
+        assert_eq!(arg1.format_specifier.as_deref(), Some("ld"));
+
+        let mut removal = TranslationUpdate::default();
+        let mut removal_map = BTreeMap::new();
+        removal_map.insert("arg1".to_string(), None);
+        removal.substitutions = Some(removal_map);
+
+        store
+            .upsert_translation("message", "en", removal)
+            .await
+            .expect("remove substitution");
+
+        let en_translation = store
+            .get_translation("message", "en")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+        assert!(en_translation.substitutions.is_empty());
     }
 
     #[tokio::test]

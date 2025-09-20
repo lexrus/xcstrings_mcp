@@ -11,6 +11,9 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 - Tool for enumerating all languages discovered in the file.
 - Embedded Axum web UI for browsing translations, filtering by query, editing values, plural variations, and managing comments.
 - Automatic discovery of `.xcstrings` files when no default path is provided, with a selector in the web UI so you can switch catalogs at runtime.
+- Inline editing for extraction state, translation state, substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases), plus the `args` metadata array — all consistently exposed via the web UI and MCP tools.
+
+The browser UI surfaces these controls alongside each key: toggle the extraction state, adjust per-language review state, manage substitution metadata, and view or edit the raw `args` payload without leaving the page.
 - JSON-first responses from tools to make automation and debugging easier.
 
 ## Prerequisites
@@ -52,13 +55,20 @@ Run the binary with stdio transport (default) and wire it into an MCP-enabled cl
 - `delete_translation(path, key, language)`
 - `delete_key(path, key)`
 - `set_comment(path, key, comment?)`
+- `set_extraction_state(path, key, extractionState?)`
 - `list_languages(path)`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
 
-`list_translations` now returns compact summaries (`key`, `comment`, `languages`, and `hasVariations`) so responses stay lightweight even for large catalogs. Use `limit` (defaults to 100, set to `0` for no limit) to page through results, and pass `include_values: true` when you intentionally want the full translation payload inline. Pair it with `get_translation` for per-language details without flooding the client context.
+`list_translations` now returns compact summaries (`key`, `comment`, `extractionState`, `languages`, and `hasVariations`) so responses stay lightweight even for large catalogs. Use `limit` (defaults to 100, set to `0` for no limit) to page through results, and pass `include_values: true` when you intentionally want the full translation payload inline. Pair it with `get_translation` for per-language details without flooding the client context.
 
-The optional `variations` argument mirrors the `.xcstrings` schema. Provide an object that maps selectors (for example `"plural"`) to their cases, where each case includes the same shape as `upsert_translation` (value, state, nested variations). Missing selectors or cases are left untouched so you can patch individual plural entries without resending the entire localization.
+When calling `upsert_translation`, you can send:
+
+- `variations` — map selectors (e.g. `"plural"`) to their cases; each case is another translation update.
+- `substitutions` — map substitution identifiers (`"arg1"`, `"device"`, etc.) to updates containing `value`, `state`, `argNum`, `formatSpecifier`, nested `variations`, or further `substitutions`.
+- `args` — the raw `args` array from Xcode’s schema. Provide either an array (replacing the existing data) or `null` to remove it.
+
+Missing selectors, substitutions, or args entries are left untouched so you can patch individual pieces without resending the entire localization payload.
 
 If the server starts without a default path (no CLI argument and no `STRINGS_PATH`), it scans the working tree for `.xcstrings` files and surfaces them through the web UI selector. When none are found, the UI shows a placeholder until a file appears. MCP tools still require an explicit `path` in this mode. Providing a default path pins the selector to that file and lets tool calls omit `path`.
 

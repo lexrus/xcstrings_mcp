@@ -106,8 +106,16 @@
         color: inherit;
       }
       textarea {
-        resize: vertical;
+        resize: none;
         min-height: 2.6rem;
+        overflow-y: hidden;
+      }
+      .translation-row:not(:hover):not(:focus-within)
+        input:not(.search-field):not(:focus),
+      .translation-row:not(:hover):not(:focus-within) textarea:not(:focus),
+      .translation-row:not(:hover):not(:focus-within) select:not(:focus) {
+        border-color: transparent;
+        background: transparent;
       }
       input:not(.search-field):focus,
       textarea:focus {
@@ -158,37 +166,58 @@
         flex-wrap: wrap;
         align-items: center;
       }
-      .state-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.2rem 0.55rem;
-        border: 1px solid #c7c7cd;
-        border-radius: 999px;
+      .state-dropdown {
+        min-width: 140px;
         font-size: 0.75rem;
-        color: #1c1c1e;
-        cursor: pointer;
-        transition:
-          border-color 0.2s ease,
-          background 0.2s ease;
       }
-      .state-pill input[type="radio"] {
-        accent-color: #1c1c1e;
+      .toast-container {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        pointer-events: none;
       }
-      .state-pill:hover {
-        border-color: #8e8e93;
-        background: #f4f4f5;
+      .toast {
+        background: #1c1c1e;
+        color: #fff;
+        padding: 12px 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        font-size: 0.85rem;
+        opacity: 0;
+        transform: translateX(100%);
+        animation: slideIn 0.3s ease forwards;
+        pointer-events: all;
+        max-width: 350px;
+        word-wrap: break-word;
       }
-      .state-pill.active {
-        border-color: #1c1c1e;
-        background: #e5e5ea;
-        font-weight: 600;
+      .toast.error {
+        background: #d70015;
       }
-      .state-pill.disabled,
-      .state-pill input[disabled] + span,
-      .state-pill input[disabled] {
-        cursor: not-allowed;
-        color: #8e8e93;
+      .toast.success {
+        background: #239a3b;
+      }
+      @keyframes slideIn {
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+      @keyframes slideOut {
+        from {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(100%);
+        }
+      }
+      .toast.hiding {
+        animation: slideOut 0.3s ease forwards;
       }
       .translation-input {
         border: 1px solid #c7c7cd;
@@ -212,12 +241,13 @@
         color: #c7c7cc;
       }
       .search-field {
-        flex: 1 1 auto;
+        flex: 0 1 200px;
         font: inherit;
         border-radius: 0;
         border: 1px solid #c7c7cd;
         background: #fff;
-        padding: 0.4rem 0.6rem;
+        padding: 0.35rem 0.5rem;
+        font-size: 0.85rem;
         transition: border-color 0.2s ease;
         color: inherit;
       }
@@ -256,16 +286,6 @@
       button.secondary:hover {
         background: #e0e0e5;
       }
-      button.refresh-button {
-        background: transparent;
-        color: #1c1c1e;
-        padding: 0.3rem 0.6rem;
-        border-radius: 0;
-        border-color: #c7c7cd;
-      }
-      button.refresh-button:hover {
-        background: #e6e6ea;
-      }
       button.add-button {
         padding: 0.3rem 0.6rem;
         border-radius: 0;
@@ -292,6 +312,7 @@
         border: 1px solid #c7c7cd;
         min-width: 11rem;
         cursor: pointer;
+        font-size: 0.9rem;
       }
       .file-select {
         min-width: 14rem;
@@ -580,26 +601,29 @@
         gap: 0.5rem;
       }
       .substitution-fields {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        display: flex;
+        flex-direction: column;
         gap: 0.45rem;
+      }
+      .substitution-field-row {
+        display: flex;
         align-items: center;
+        gap: 0.5rem;
+      }
+      .substitution-field-label {
+        min-width: 100px;
+        font-size: 0.72rem;
+        color: #48484a;
       }
       .substitution-fields input,
+      .substitution-fields select,
       .substitution-fields textarea {
-        width: 100%;
+        flex: 1;
       }
       .substitution-actions {
         display: flex;
         gap: 0.4rem;
         flex-wrap: wrap;
-      }
-      .state-options.compact {
-        gap: 0.3rem;
-      }
-      .state-options.compact .state-pill {
-        font-size: 0.7rem;
-        padding: 0.15rem 0.4rem;
       }
       .variation-section {
         display: flex;
@@ -819,9 +843,6 @@
             ></select>
           </div>
         </div>
-        <button class="refresh-button" id="refresh" title="Refresh list">
-          Refresh
-        </button>
         <input
           type="text"
           id="search"
@@ -855,7 +876,7 @@
     </nav>
     <main>
       <div id="empty-placeholder" class="empty-placeholder hidden">
-        No .xcstrings files found. Add one to the project and refresh.
+        No .xcstrings files found. Add one to the project.
       </div>
       <div id="status" class="status"></div>
       <table id="translations-table">
@@ -868,6 +889,7 @@
         <tbody id="translations-body"></tbody>
       </table>
     </main>
+    <div class="toast-container" id="toast-container"></div>
     <script>
       const LANGUAGE_REGIONS = {
         en: "US",
@@ -1103,7 +1125,7 @@
       function isInteractiveTarget(target) {
         return Boolean(
           target.closest(
-            "input, textarea, select, button, a, .state-pill, .plural-picker, .variation-picker",
+            "input, textarea, select, button, a, .plural-picker, .variation-picker",
           ),
         );
       }
@@ -1252,11 +1274,7 @@
           Object.keys(substitution.variations).length > 0;
 
         return (
-          !hasValue &&
-          !hasState &&
-          !hasArgNum &&
-          !hasFormat &&
-          !hasVariations
+          !hasValue && !hasState && !hasArgNum && !hasFormat && !hasVariations
         );
       }
 
@@ -1993,94 +2011,61 @@
           translationLabel.textContent = "State";
           translationMeta.appendChild(translationLabel);
 
-          const stateGroup = document.createElement("div");
-          stateGroup.className = "state-options";
-          const radioGroupName = `translation-state-${
-            activeKey || item.__draftId || Math.random().toString(36).slice(2)
-          }`;
+          const stateDropdown = document.createElement("select");
+          stateDropdown.className = "state-dropdown";
+          stateDropdown.disabled = !state.currentLanguage;
 
           const updateStateVisuals = () => {
-            const current = translation.state || "";
-            stateGroup.querySelectorAll("label.state-pill").forEach((pill) => {
-              const radio = pill.querySelector('input[type="radio"]');
-              const value = radio.value || "";
-              const shouldCheck = value === current;
-              radio.checked = shouldCheck;
-              pill.classList.toggle("active", shouldCheck);
-              if (radio.disabled) {
-                pill.classList.add("disabled");
-              } else {
-                pill.classList.remove("disabled");
-              }
-            });
             applyTranslationStateStyles(translationTextarea, translation.state);
             applyRowStateStyles(tr, translation.state);
           };
 
           TRANSLATION_STATES.forEach((option) => {
             const normalized = option || "";
-            const pill = document.createElement("label");
-            pill.className = "state-pill";
-
-            const radio = document.createElement("input");
-            radio.type = "radio";
-            radio.name = radioGroupName;
-            radio.value = normalized;
-            radio.disabled = !state.currentLanguage;
+            const optionElem = document.createElement("option");
+            optionElem.value = normalized;
+            optionElem.textContent = translationStateLabel(normalized);
             if ((translation.state || "") === normalized) {
-              radio.checked = true;
-              pill.classList.add("active");
+              optionElem.selected = true;
             }
-
-            radio.addEventListener("change", async () => {
-              if (!radio.checked) {
-                return;
-              }
-              const previous = translation.state || "";
-              const nextStateValue = normalized || null;
-
-              if (!state.currentLanguage) {
-                setStatus("Select a language before editing state", true);
-                translation.state = previous ? previous : null;
-                updateStateVisuals();
-                return;
-              }
-
-              if (!activeKey) {
-                translation.state = nextStateValue;
-                updateStateVisuals();
-                return;
-              }
-
-              try {
-                await updateTranslationState(
-                  activeKey,
-                  state.currentLanguage,
-                  nextStateValue,
-                );
-                translation.state = nextStateValue;
-              } catch (error) {
-                setStatus(error.message, true);
-                translation.state = previous ? previous : null;
-              }
-
-              updateStateVisuals();
-            });
-
-            const text = document.createElement("span");
-            text.textContent = translationStateLabel(normalized);
-
-            pill.appendChild(radio);
-            pill.appendChild(text);
-
-            if (radio.disabled) {
-              pill.classList.add("disabled");
-            }
-
-            stateGroup.appendChild(pill);
+            stateDropdown.appendChild(optionElem);
           });
 
-          translationMeta.appendChild(stateGroup);
+          stateDropdown.addEventListener("change", async (event) => {
+            const previous = translation.state || "";
+            const nextStateValue = event.target.value || null;
+
+            if (!state.currentLanguage) {
+              setStatus("Select a language before editing state", true);
+              translation.state = previous ? previous : null;
+              stateDropdown.value = previous;
+              updateStateVisuals();
+              return;
+            }
+
+            if (!activeKey) {
+              translation.state = nextStateValue;
+              updateStateVisuals();
+              return;
+            }
+
+            try {
+              await updateTranslationState(
+                activeKey,
+                state.currentLanguage,
+                nextStateValue,
+              );
+              translation.state = nextStateValue;
+            } catch (error) {
+              setStatus(error.message, true);
+              translation.state = previous ? previous : null;
+              stateDropdown.value = previous;
+            }
+
+            updateStateVisuals();
+          });
+
+          translationMeta.appendChild(stateDropdown);
           translationDetails.appendChild(translationMeta);
           translationDetailsHasContent = true;
 
@@ -2592,44 +2577,62 @@
           const fields = document.createElement("div");
           fields.className = "substitution-fields";
 
+          // argNum field row
+          const argNumRow = document.createElement("div");
+          argNumRow.className = "substitution-field-row";
+          const argNumLabel = document.createElement("label");
+          argNumLabel.className = "substitution-field-label";
+          argNumLabel.textContent = "Arg Number:";
+          argNumRow.appendChild(argNumLabel);
+
           const argNumInput = document.createElement("input");
-          argNumInput.type = "number";
-          argNumInput.placeholder = "argNum";
+          argNumInput.type = "text";
+          argNumInput.placeholder = "Auto-calculated";
+          argNumInput.readOnly = true;
+          argNumInput.style.background = "#f8f8f8";
+          argNumInput.style.color = "#666";
           if (
             substitution.argNum !== undefined &&
             substitution.argNum !== null
           ) {
             argNumInput.value = substitution.argNum;
+          } else {
+            argNumInput.value = "Auto";
           }
-          argNumInput.addEventListener("change", async (event) => {
-            const value =
-              event.target.value === "" ? null : Number(event.target.value);
-            try {
-              await updateSubstitution(
-                activeKey,
-                subKey,
-                { argNum: value },
-                "Argument index saved",
-              );
-            } catch (error) {
-              setStatus(error.message, true);
-              if (
-                substitution.argNum !== undefined &&
-                substitution.argNum !== null
-              ) {
-                event.target.value = substitution.argNum;
-              } else {
-                event.target.value = "";
-              }
-            }
-          });
-          fields.appendChild(argNumInput);
+          argNumRow.appendChild(argNumInput);
+          fields.appendChild(argNumRow);
 
-          const formatInput = document.createElement("input");
-          formatInput.type = "text";
-          formatInput.placeholder = "formatSpecifier";
-          formatInput.value = substitution.formatSpecifier || "";
-          formatInput.addEventListener("change", async (event) => {
+          // formatSpecifier field row
+          const formatRow = document.createElement("div");
+          formatRow.className = "substitution-field-row";
+          const formatLabel = document.createElement("label");
+          formatLabel.className = "substitution-field-label";
+          formatLabel.textContent = "Format:";
+          formatRow.appendChild(formatLabel);
+
+          const formatSelect = document.createElement("select");
+          formatSelect.className = "format-specifier-dropdown";
+
+          const formatOptions = [
+            { value: "", label: "None" },
+            { value: "@", label: "@ - Object/String" },
+            { value: "ld", label: "ld - Long Integer" },
+            { value: "lld", label: "lld - Long Long Integer" },
+            { value: "llu", label: "llu - Long Long Unsigned" },
+            { value: "lf", label: "lf - Long Float/Double" },
+          ];
+
+          formatOptions.forEach((option) => {
+            const optionElem = document.createElement("option");
+            optionElem.value = option.value;
+            optionElem.textContent = option.label;
+            if ((substitution.formatSpecifier || "") === option.value) {
+              optionElem.selected = true;
+            }
+            formatSelect.appendChild(optionElem);
+          });
+
+          formatSelect.addEventListener("change", async (event) => {
             const value = event.target.value || null;
             try {
               await updateSubstitution(
@@ -2640,67 +2643,59 @@
               );
             } catch (error) {
               setStatus(error.message, true);
-              event.target.value = substitution.formatSpecifier || "";
+              formatSelect.value = substitution.formatSpecifier || "";
             }
           });
-          fields.appendChild(formatInput);
+          formatRow.appendChild(formatSelect);
+          fields.appendChild(formatRow);
 
-          const stateGroup = document.createElement("div");
-          stateGroup.className = "state-options compact";
-          const syncState = () => {
-            const current = substitution.state || "";
-            stateGroup.querySelectorAll("label.state-pill").forEach((pill) => {
-              const radio = pill.querySelector('input[type="radio"]');
-              const value = radio.value || "";
-              const active = value === current;
-              radio.checked = active;
-              pill.classList.toggle("active", active);
-            });
-          };
-          const stateGroupName = `substitution-state-${activeKey}-${subKey}`;
+          // State field row
+          const stateRow = document.createElement("div");
+          stateRow.className = "substitution-field-row";
+          const stateLabel = document.createElement("label");
+          stateLabel.className = "substitution-field-label";
+          stateLabel.textContent = "State:";
+          stateRow.appendChild(stateLabel);
+
+          const stateDropdown = document.createElement("select");
+          stateDropdown.className = "state-dropdown";
           TRANSLATION_STATES.forEach((option) => {
             const normalized = option || "";
-            const pill = document.createElement("label");
-            pill.className = "state-pill";
-
-            const radio = document.createElement("input");
-            radio.type = "radio";
-            radio.name = stateGroupName;
-            radio.value = normalized;
+            const optionElem = document.createElement("option");
+            optionElem.value = normalized;
+            optionElem.textContent = translationStateLabel(normalized);
             if ((substitution.state || "") === normalized) {
-              radio.checked = true;
-              pill.classList.add("active");
+              optionElem.selected = true;
             }
-            radio.addEventListener("change", async () => {
-              if (!radio.checked) {
-                return;
-              }
-              const previous = substitution.state || "";
-              const next = normalized || null;
-              try {
-                await updateSubstitution(
-                  activeKey,
-                  subKey,
-                  { state: next },
-                  "Substitution state saved",
-                );
-              } catch (error) {
-                setStatus(error.message, true);
-                substitution.state = previous ? previous : null;
-              }
-              substitution.state = next;
-              syncState();
-            });
-
-            const label = document.createElement("span");
-            label.textContent = translationStateLabel(normalized);
-
-            pill.appendChild(radio);
-            pill.appendChild(label);
-            stateGroup.appendChild(pill);
+            stateDropdown.appendChild(optionElem);
           });
-          syncState();
-          fields.appendChild(stateGroup);
+          stateDropdown.addEventListener("change", async (event) => {
+            const previous = substitution.state || "";
+            const next = event.target.value || null;
+            try {
+              await updateSubstitution(
+                activeKey,
+                subKey,
+                { state: next },
+                "Substitution state saved",
+              );
+              substitution.state = next;
+            } catch (error) {
+              setStatus(error.message, true);
+              substitution.state = previous ? previous : null;
+              stateDropdown.value = previous;
+            }
+          });
+          stateRow.appendChild(stateDropdown);
+          fields.appendChild(stateRow);
+
+          // Value field row
+          const valueRow = document.createElement("div");
+          valueRow.className = "substitution-field-row";
+          const valueLabel = document.createElement("label");
+          valueLabel.className = "substitution-field-label";
+          valueLabel.textContent = "Value:";
+          valueRow.appendChild(valueLabel);
 
           const valueTextarea = document.createElement("textarea");
           valueTextarea.rows = 1;
@@ -2718,7 +2713,8 @@
               valueTextarea.value = substitution.value || "";
             }
           });
-          fields.appendChild(valueTextarea);
+          valueRow.appendChild(valueTextarea);
+          fields.appendChild(valueRow);
           requestAnimationFrame(() => initAutoResize(valueTextarea));
 
           block.appendChild(fields);
@@ -3150,15 +3146,32 @@
       }
 
       function setStatus(message, isError = false) {
+        // Legacy status bar update for backward compatibility
         const status = document.getElementById("status");
-        status.textContent = message;
-        status.className = isError ? "status error" : "status";
+        status.textContent = "";
+        status.className = "status";
+
+        // Show toast notification
         if (message) {
-          setTimeout(() => {
-            status.textContent = "";
-            status.className = "status";
-          }, 3500);
+          showToast(message, isError);
         }
+      }
+
+      function showToast(message, isError = false) {
+        const container = document.getElementById("toast-container");
+        const toast = document.createElement("div");
+        toast.className = `toast ${isError ? "error" : "success"}`;
+        toast.textContent = message;
+
+        container.appendChild(toast);
+
+        // Auto-dismiss after 3.5 seconds
+        setTimeout(() => {
+          toast.classList.add("hiding");
+          setTimeout(() => {
+            container.removeChild(toast);
+          }, 300);
+        }, 3500);
       }
 
       document
@@ -3212,9 +3225,6 @@
           renderTable();
         });
 
-      document.getElementById("refresh").addEventListener("click", async () => {
-        await loadFiles();
-      });
 
       document.getElementById("search").addEventListener("input", (event) => {
         if (!state.currentPath && !SAMPLE_MODE) {

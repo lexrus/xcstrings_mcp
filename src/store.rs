@@ -758,6 +758,9 @@ impl XcStringsStoreManager {
         {
             let stores = self.stores.read().await;
             if let Some(store) = stores.get(&resolved_path) {
+                // Try to reload to ensure we have the latest file contents
+                // If reload fails, still return the cached store
+                let _ = store.reload().await;
                 return Ok(store.clone());
             }
         }

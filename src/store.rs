@@ -345,7 +345,9 @@ fn is_blank(value: &Option<String>) -> bool {
 }
 
 fn sanitize_string_unit(unit: &mut XcStringUnit) {
-    if is_blank(&unit.value) {
+    // Only remove empty values if there's no explicit state
+    // This allows empty placeholders with state (e.g., "new") to persist
+    if is_blank(&unit.value) && unit.state.is_none() {
         unit.value = None;
     }
 
@@ -359,6 +361,8 @@ fn sanitize_string_unit(unit: &mut XcStringUnit) {
 }
 
 fn string_unit_has_content(unit: &XcStringUnit) -> bool {
+    // Consider a unit as having content if it has both value and state
+    // Even empty string values are valid if they have a state
     unit.value.is_some() && unit.state.is_some()
 }
 
@@ -1529,5 +1533,272 @@ mod tests {
             .expect("second load");
 
         assert!(Arc::ptr_eq(&store_a, &store_b));
+    }
+
+    #[tokio::test]
+    async fn test_add_substitution_with_empty_value_and_state() {
+        let temp = TempStorePath::new("test_substitution_with_state");
+        let path = temp.file.clone();
+
+        // Create initial file
+        let initial_content = serde_json::json!({
+            "sourceLanguage": "en",
+            "version": "1.0",
+            "strings": {
+                "test.key": {
+                    "localizations": {
+                        "en": {
+                            "stringUnit": {
+                                "state": "translated",
+                                "value": "Hello %@, you have %d messages"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        fs::write(&path, initial_content.to_string()).await.unwrap();
+
+        let store = XcStringsStore::load_or_create(path.clone()).await.unwrap();
+
+        // Add a substitution with empty value but with state
+        let mut update = TranslationUpdate::default();
+        let mut substitutions = BTreeMap::new();
+
+        let mut sub_update = SubstitutionUpdate::default();
+        sub_update.value = Some(Some("".to_string()));
+        sub_update.state = Some(Some("new".to_string()));
+
+        substitutions.insert("userName".to_string(), Some(sub_update));
+        update.substitutions = Some(substitutions);
+
+        let result = store
+            .upsert_translation("test.key", "en", update)
+            .await
+            .unwrap();
+
+        // Verify the substitution was added
+        assert!(!result.substitutions.is_empty());
+        let subs = &result.substitutions;
+        assert!(subs.contains_key("userName"));
+
+        let user_name_sub = &subs["userName"];
+        assert_eq!(user_name_sub.value, Some("".to_string()));
+        assert_eq!(user_name_sub.state, Some("new".to_string()));
+
+        // Verify it persists in the file
+        let content = fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("\"userName\""));
+        assert!(content.contains("\"substitutions\""));
+    }
+
+    #[tokio::test]
+    async fn test_add_plural_variation_with_empty_value_and_state() {
+        let temp = TempStorePath::new("test_plural_with_state");
+        let path = temp.file.clone();
+
+        // Create initial file
+        let initial_content = serde_json::json!({
+            "sourceLanguage": "en",
+            "version": "1.0",
+            "strings": {
+                "message.count": {
+                    "localizations": {
+                        "en": {
+                            "stringUnit": {
+                                "state": "translated",
+                                "value": "You have messages"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        fs::write(&path, initial_content.to_string()).await.unwrap();
+
+        let store = XcStringsStore::load_or_create(path.clone()).await.unwrap();
+
+        // Add plural variation with empty value but with state
+        let mut update = TranslationUpdate::default();
+        let mut variations = BTreeMap::new();
+        let mut plural_cases = BTreeMap::new();
+
+        let mut one_update = TranslationUpdate::default();
+        one_update.value = Some(Some("".to_string()));
+        one_update.state = Some(Some("new".to_string()));
+
+        plural_cases.insert("one".to_string(), one_update);
+        variations.insert("plural".to_string(), plural_cases);
+        update.variations = Some(variations);
+
+        let result = store
+            .upsert_translation("message.count", "en", update)
+            .await
+            .unwrap();
+
+        // Verify the variation was added
+        assert!(!result.variations.is_empty());
+        let vars = &result.variations;
+        assert!(vars.contains_key("plural"));
+
+        let plural_vars = &vars["plural"];
+        assert!(plural_vars.contains_key("one"));
+
+        let one_var = &plural_vars["one"];
+        assert_eq!(one_var.value, Some("".to_string()));
+        assert_eq!(one_var.state, Some("new".to_string()));
+
+        // Verify it persists in the file
+        let content = fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("\"variations\""));
+        assert!(content.contains("\"plural\""));
+        assert!(content.contains("\"one\""));
+    }
+
+    #[tokio::test]
+    async fn test_substitution_without_state_gets_filtered() {
+        let temp = TempStorePath::new("test_substitution_without_state");
+        let path = temp.file.clone();
+
+        // Create initial file
+        let initial_content = serde_json::json!({
+            "sourceLanguage": "en",
+            "version": "1.0",
+            "strings": {
+                "test.key": {
+                    "localizations": {
+                        "en": {
+                            "stringUnit": {
+                                "state": "translated",
+                                "value": "Hello"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        fs::write(&path, initial_content.to_string()).await.unwrap();
+
+        let store = XcStringsStore::load_or_create(path.clone()).await.unwrap();
+
+        // Try to add a substitution with only empty value (no state)
+        let mut update = TranslationUpdate::default();
+        let mut substitutions = BTreeMap::new();
+
+        let mut sub_update = SubstitutionUpdate::default();
+        sub_update.value = Some(Some("".to_string()));
+        // No state set!
+
+        substitutions.insert("userName".to_string(), Some(sub_update));
+        update.substitutions = Some(substitutions);
+
+        let result = store
+            .upsert_translation("test.key", "en", update)
+            .await
+            .unwrap();
+
+        // The substitution should be filtered out because it has no content
+        assert!(result.substitutions.is_empty());
+
+        // Verify it's not in the file
+        let content = fs::read_to_string(&path).await.unwrap();
+        assert!(!content.contains("\"substitutions\""));
+    }
+
+    #[tokio::test]
+    async fn test_substitution_variations_with_state() {
+        let temp = TempStorePath::new("test_substitution_variations");
+        let path = temp.file.clone();
+
+        // Create initial file with a substitution
+        let initial_content = serde_json::json!({
+            "sourceLanguage": "en",
+            "version": "1.0",
+            "strings": {
+                "test.key": {
+                    "localizations": {
+                        "en": {
+                            "stringUnit": {
+                                "state": "translated",
+                                "value": "You have %d messages"
+                            },
+                            "substitutions": {
+                                "count": {
+                                    "stringUnit": {
+                                        "state": "translated",
+                                        "value": "message count"
+                                    },
+                                    "argNum": 1,
+                                    "formatSpecifier": "d"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        fs::write(&path, initial_content.to_string()).await.unwrap();
+
+        let store = XcStringsStore::load_or_create(path.clone()).await.unwrap();
+
+        // Add plural variation to the substitution with state
+        let mut update = TranslationUpdate::default();
+        let mut substitutions = BTreeMap::new();
+
+        let mut sub_update = SubstitutionUpdate::default();
+        let mut variations = BTreeMap::new();
+        let mut plural_cases = BTreeMap::new();
+
+        let mut one_update = TranslationUpdate::default();
+        one_update.value = Some(Some("".to_string()));
+        one_update.state = Some(Some("new".to_string()));
+        plural_cases.insert("one".to_string(), one_update);
+
+        let mut other_update = TranslationUpdate::default();
+        other_update.value = Some(Some("".to_string()));
+        other_update.state = Some(Some("new".to_string()));
+        plural_cases.insert("other".to_string(), other_update);
+
+        variations.insert("plural".to_string(), plural_cases);
+        sub_update.variations = Some(variations);
+
+        substitutions.insert("count".to_string(), Some(sub_update));
+        update.substitutions = Some(substitutions);
+
+        let result = store
+            .upsert_translation("test.key", "en", update)
+            .await
+            .unwrap();
+
+        // Verify the substitution variations were added
+        assert!(!result.substitutions.is_empty());
+        let subs = &result.substitutions;
+        assert!(subs.contains_key("count"));
+
+        let count_sub = &subs["count"];
+        assert!(!count_sub.variations.is_empty());
+        assert!(count_sub.variations.contains_key("plural"));
+
+        let plural_vars = &count_sub.variations["plural"];
+        assert_eq!(plural_vars.len(), 2);
+        assert!(plural_vars.contains_key("one"));
+        assert!(plural_vars.contains_key("other"));
+
+        // Check each variation has the correct state
+        for (_, var) in plural_vars {
+            assert_eq!(var.value, Some("".to_string()));
+            assert_eq!(var.state, Some("new".to_string()));
+        }
+
+        // Verify it persists in the file
+        let content = fs::read_to_string(&path).await.unwrap();
+        assert!(content.contains("\"variations\""));
+        assert!(content.contains("\"plural\""));
+        assert!(content.contains("\"one\""));
+        assert!(content.contains("\"other\""));
     }
 }

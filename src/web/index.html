@@ -2252,7 +2252,7 @@
                   return;
                 }
                 const updates = { plural: {} };
-                updates.plural[caseKey] = { value: "" };
+                updates.plural[caseKey] = { value: "", state: "new" };
                 try {
                   await upsertTranslation(
                     {
@@ -2300,7 +2300,7 @@
               await updateSubstitution(
                 activeKey,
                 newKey,
-                { value: "" },
+                { value: "", state: "new" },
                 "Substitution added",
               );
               captureScrollPosition();
@@ -2770,7 +2770,7 @@
                   {
                     variations: {
                       [selector]: {
-                        [caseKey]: { value: "" },
+                        [caseKey]: { value: "", state: "new" },
                       },
                     },
                   },
@@ -2842,7 +2842,7 @@
                   {
                     variations: {
                       [selector]: {
-                        [normalizedCase]: { value: "" },
+                        [normalizedCase]: { value: "", state: "new" },
                       },
                     },
                   },
@@ -2969,7 +2969,7 @@
                   {
                     variations: {
                       [selector]: {
-                        [normalizedCase]: { value: "" },
+                        [normalizedCase]: { value: "", state: "new" },
                       },
                     },
                   },
@@ -3224,7 +3224,6 @@
           state.referenceLanguage = next;
           renderTable();
         });
-
 
       document.getElementById("search").addEventListener("input", (event) => {
         if (!state.currentPath && !SAMPLE_MODE) {

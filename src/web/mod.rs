@@ -1,4 +1,6 @@
-use std::{collections::BTreeMap, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
+
+use indexmap::IndexMap;
 
 use axum::{
     extract::{Path, Query},
@@ -88,9 +90,9 @@ struct UpsertRequest {
     )]
     state: Option<Option<String>>,
     #[serde(default)]
-    variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    variations: Option<IndexMap<String, IndexMap<String, VariationUpdatePayload>>>,
     #[serde(default)]
-    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
+    substitutions: Option<IndexMap<String, Option<SubstitutionUpdatePayload>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,16 +110,16 @@ struct VariationUpdatePayload {
     )]
     state: Option<Option<String>>,
     #[serde(default)]
-    variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    variations: Option<IndexMap<String, IndexMap<String, VariationUpdatePayload>>>,
     #[serde(default)]
-    substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
+    substitutions: Option<IndexMap<String, Option<SubstitutionUpdatePayload>>>,
 }
 
 impl VariationUpdatePayload {
     fn into_update(self) -> TranslationUpdate {
         let mut update = TranslationUpdate::default();
-        update.value = self.value;
         update.state = self.state;
+        update.value = self.value;
         if let Some(variations) = self.variations {
             update.variations = Some(
                 variations
@@ -171,7 +173,7 @@ struct SubstitutionUpdatePayload {
     )]
     format_specifier: Option<Option<String>>,
     #[serde(default)]
-    variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
+    variations: Option<IndexMap<String, IndexMap<String, VariationUpdatePayload>>>,
 }
 
 impl SubstitutionUpdatePayload {
@@ -202,8 +204,8 @@ impl SubstitutionUpdatePayload {
 impl UpsertRequest {
     fn into_update(self) -> TranslationUpdate {
         let mut update = TranslationUpdate::default();
-        update.value = self.value;
         update.state = self.state;
+        update.value = self.value;
         if let Some(variations) = self.variations {
             update.variations = Some(
                 variations
@@ -639,18 +641,18 @@ mod tests {
 
         // Test deleting the "one" plural case using the store directly
         let delete_update = TranslationUpdate {
-            value: None,
             state: None,
+            value: None,
             variations: Some({
-                let mut variations = BTreeMap::new();
-                let mut plural_cases = BTreeMap::new();
+                let mut variations = IndexMap::new();
+                let mut plural_cases = IndexMap::new();
                 plural_cases.insert(
                     "one".to_string(),
                     TranslationUpdate {
-                        value: Some(None), // Explicitly set to None to delete
                         state: Some(None),
-                        variations: None,
+                        value: Some(None), // Explicitly set to None to delete
                         substitutions: None,
+                        variations: None,
                     },
                 );
                 variations.insert("plural".to_string(), plural_cases);

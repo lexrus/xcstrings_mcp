@@ -115,8 +115,8 @@ struct VariationUpdateParam {
 impl VariationUpdateParam {
     fn into_update(self) -> TranslationUpdate {
         let mut update = TranslationUpdate::default();
-        update.value = self.value;
         update.state = self.state;
+        update.value = self.value;
         if let Some(variations) = self.variations {
             update.variations = Some(
                 variations
@@ -185,8 +185,8 @@ impl SubstitutionUpdateParam {
 impl UpsertTranslationParams {
     fn into_update(self) -> TranslationUpdate {
         let mut update = TranslationUpdate::default();
-        update.value = self.value;
         update.state = self.state;
+        update.value = self.value;
         if let Some(variations) = self.variations {
             update.variations = Some(
                 variations

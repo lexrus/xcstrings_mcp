@@ -209,6 +209,15 @@ struct ExtractionStateRequest {
     path: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ShouldTranslateRequest {
+    key: String,
+    #[serde(rename = "shouldTranslate", default)]
+    should_translate: Option<bool>,
+    #[serde(default)]
+    path: Option<String>,
+}
+
 pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
     Router::new()
         .route("/", get(index))
@@ -224,6 +233,7 @@ pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
         .route("/api/keys/:key", delete(delete_key).put(rename_key))
         .route("/api/comments", post(update_comment))
         .route("/api/extraction-state", post(update_extraction_state))
+        .route("/api/should-translate", post(update_should_translate))
         .route("/api/languages", get(list_languages))
         .layer(Extension(manager))
 }
@@ -367,6 +377,19 @@ async fn update_extraction_state(
     let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
     store
         .set_extraction_state(&payload.key, payload.extraction_state.clone())
+        .await
+        .map_err(ApiError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn update_should_translate(
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
+    Json(payload): Json<ShouldTranslateRequest>,
+) -> Result<StatusCode, ApiError> {
+    let path = payload.path.clone();
+    let store = resolve_store(manager.as_ref(), path.as_deref()).await?;
+    store
+        .set_should_translate(&payload.key, payload.should_translate)
         .await
         .map_err(ApiError::from)?;
     Ok(StatusCode::NO_CONTENT)

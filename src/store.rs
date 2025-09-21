@@ -638,6 +638,8 @@ pub struct TranslationRecord {
     pub comment: Option<String>,
     #[serde(rename = "extractionState")]
     pub extraction_state: Option<String>,
+    #[serde(rename = "shouldTranslate")]
+    pub should_translate: Option<bool>,
     pub translations: BTreeMap<String, TranslationValue>,
 }
 
@@ -901,6 +903,7 @@ impl XcStringsStore {
                     key: key.clone(),
                     comment: entry.comment.clone(),
                     extraction_state: entry.extraction_state.clone(),
+                    should_translate: entry.should_translate,
                     translations,
                 })
             })
@@ -1073,6 +1076,24 @@ impl XcStringsStore {
             .entry(key.to_string())
             .or_insert_with(XcStringEntry::default);
         entry.comment = comment;
+        normalize_strings_file(&mut doc);
+        let serialized = serde_json::to_string_pretty(&*doc)?;
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
+    }
+
+    pub async fn set_should_translate(
+        &self,
+        key: &str,
+        should_translate: Option<bool>,
+    ) -> Result<(), StoreError> {
+        let mut doc = self.data.write().await;
+        let entry = doc
+            .strings
+            .entry(key.to_string())
+            .or_insert_with(XcStringEntry::default);
+        entry.should_translate = should_translate;
         normalize_strings_file(&mut doc);
         let serialized = serde_json::to_string_pretty(&*doc)?;
         drop(doc);
@@ -1306,6 +1327,46 @@ mod tests {
             .expect("clear extraction state");
         let records = store.list_records(None).await;
         assert!(records[0].extraction_state.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_should_translate_round_trip() {
+        let tmp = TempStorePath::new("should_translate_round_trip");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .upsert_translation(
+                "login.button",
+                "en",
+                TranslationUpdate::from_value_state(Some("Login".into()), None),
+            )
+            .await
+            .expect("seed translation for should_translate");
+
+        store
+            .set_should_translate("login.button", Some(true))
+            .await
+            .expect("set should_translate to true");
+
+        let records = store.list_records(None).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].should_translate, Some(true));
+
+        store
+            .set_should_translate("login.button", Some(false))
+            .await
+            .expect("set should_translate to false");
+        let records = store.list_records(None).await;
+        assert_eq!(records[0].should_translate, Some(false));
+
+        store
+            .set_should_translate("login.button", None)
+            .await
+            .expect("clear should_translate");
+        let records = store.list_records(None).await;
+        assert!(records[0].should_translate.is_none());
     }
 
     #[tokio::test]

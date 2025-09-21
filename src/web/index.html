@@ -90,7 +90,18 @@
       .reference-row {
         opacity: 0.75;
       }
-      input:not(.search-field),
+      input[type="checkbox"] {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        vertical-align: middle;
+        accent-color: #0a84ff;
+      }
+      input[type="checkbox"]:disabled {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      input:not(.search-field):not([type="checkbox"]),
       textarea {
         font-family:
           "Maple Mono NF CN", "JetBrainsMono", "SF Mono", Monaco,
@@ -111,13 +122,13 @@
         overflow-y: hidden;
       }
       .translation-row:not(:hover):not(:focus-within)
-        input:not(.search-field):not(:focus),
+        input:not(.search-field):not(:focus):not([type="checkbox"]),
       .translation-row:not(:hover):not(:focus-within) textarea:not(:focus),
       .translation-row:not(:hover):not(:focus-within) select:not(:focus) {
         border-color: transparent;
         background: transparent;
       }
-      input:not(.search-field):focus,
+      input:not(.search-field):not([type="checkbox"]):focus,
       textarea:focus {
         outline: none;
         border-color: #0a84ff;
@@ -942,32 +953,43 @@
       };
 
       const PLURAL_CASES = ["zero", "one", "two", "few", "many", "other"];
-      const EXTRACTION_STATES = ["automatic", "manual"];
+      const EXTRACTION_STATES = ["manual", "stale", "extracted"];
       const TRANSLATION_STATES = [
         "",
-        "new",
         "translated",
         "needs_review",
-        "stale",
-        "verified",
+        "new",
+        "missing",
+        "untranslated",
       ];
       const TRANSLATION_STATE_LABELS = {
         "": "Unset",
-        new: "New",
         translated: "Translated",
         needs_review: "Needs review",
-        stale: "Stale",
-        verified: "Verified",
+        new: "New",
+        missing: "Missing",
+        untranslated: "Untranslated",
       };
       const DEVICE_CASES = [
-        "universal",
-        "iphone",
+        "appletv",
+        "applevision",
+        "applewatch",
         "ipad",
+        "iphone",
+        "ipod",
         "mac",
-        "watch",
-        "tv",
-        "vision",
+        "other",
       ];
+      const DEVICE_CASE_LABELS = {
+        appletv: "Apple TV",
+        applevision: "Apple Vision",
+        applewatch: "Apple Watch",
+        ipad: "iPad",
+        iphone: "iPhone",
+        ipod: "iPod",
+        mac: "Mac",
+        other: "Other",
+      };
       const VARIATION_SELECTORS = {
         plural: { label: "Plural", cases: PLURAL_CASES },
         device: { label: "Device", cases: DEVICE_CASES },
@@ -1146,6 +1168,13 @@
           return config.label;
         }
         return selector.charAt(0).toUpperCase() + selector.slice(1);
+      }
+
+      function getCaseLabel(selector, caseKey) {
+        if (selector === "device" && DEVICE_CASE_LABELS[caseKey]) {
+          return DEVICE_CASE_LABELS[caseKey];
+        }
+        return caseKey;
       }
 
       function pruneTranslationInPlace(node) {
@@ -1862,6 +1891,43 @@
             }
           });
           metaRow.appendChild(extractionSelect);
+
+          const shouldTranslateLabel = document.createElement("span");
+          shouldTranslateLabel.className = "meta-label";
+          shouldTranslateLabel.textContent = "Should Translate";
+          shouldTranslateLabel.style.marginLeft = "16px";
+          metaRow.appendChild(shouldTranslateLabel);
+
+          const shouldTranslateCheckbox = document.createElement("input");
+          shouldTranslateCheckbox.type = "checkbox";
+          shouldTranslateCheckbox.style.marginLeft = "6px";
+          shouldTranslateCheckbox.checked = item.shouldTranslate === true;
+          shouldTranslateCheckbox.indeterminate =
+            item.shouldTranslate === null || item.shouldTranslate === undefined;
+          shouldTranslateCheckbox.disabled = isDraft;
+          shouldTranslateCheckbox.addEventListener("change", async (event) => {
+            const next = event.target.checked ? true : null;
+            if (!activeKey) {
+              item.shouldTranslate = next;
+              return;
+            }
+            if (isDraft) {
+              item.shouldTranslate = next;
+              return;
+            }
+            try {
+              await updateShouldTranslate(activeKey, next);
+              item.shouldTranslate = next;
+            } catch (error) {
+              setStatus(error.message, true);
+              shouldTranslateCheckbox.checked = item.shouldTranslate === true;
+              shouldTranslateCheckbox.indeterminate =
+                item.shouldTranslate === null ||
+                item.shouldTranslate === undefined;
+            }
+          });
+          metaRow.appendChild(shouldTranslateCheckbox);
+
           keyDetails.appendChild(metaRow);
           keyDetailsHasContent = true;
 
@@ -2244,7 +2310,7 @@
               const optionBtn = document.createElement("button");
               optionBtn.type = "button";
               optionBtn.className = "plural-option";
-              optionBtn.textContent = caseKey;
+              optionBtn.textContent = getCaseLabel("plural", caseKey);
               optionBtn.addEventListener("click", async () => {
                 if (!activeKey) {
                   setStatus("Set a key before adding plural forms", true);
@@ -2404,6 +2470,43 @@
           throw new Error(message);
         }
         setStatus("Extraction state updated");
+      }
+
+      async function updateShouldTranslate(key, shouldTranslate) {
+        if (SAMPLE_MODE) {
+          const target = sampleStore.items.find((item) => item.key === key);
+          if (!target) {
+            throw new Error("Key not found in sample data");
+          }
+          target.shouldTranslate = shouldTranslate || null;
+          setStatus("Should translate updated");
+          return;
+        }
+        if (!state.currentPath) {
+          throw new Error("Select a file before updating should translate");
+        }
+        const res = await fetch("/api/should-translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            key,
+            shouldTranslate: shouldTranslate,
+            path: state.currentPath,
+          }),
+        });
+        if (!res.ok) {
+          let message = `Failed to update should translate (${res.status})`;
+          try {
+            const err = await res.json();
+            if (err?.error) {
+              message = err.error;
+            }
+          } catch (_) {
+            // ignore
+          }
+          throw new Error(message);
+        }
+        setStatus("Should translate updated");
       }
 
       function mergeSubstitution(existing, patch) {
@@ -2757,7 +2860,7 @@
             const optionBtn = document.createElement("button");
             optionBtn.type = "button";
             optionBtn.className = "variation-option";
-            optionBtn.textContent = caseKey;
+            optionBtn.textContent = getCaseLabel(selector, caseKey);
             optionBtn.addEventListener("click", async () => {
               if (!activeKey) {
                 picker.classList.add("hidden");
@@ -2872,7 +2975,7 @@
 
             const label = document.createElement("span");
             label.className = "variation-case-label";
-            label.textContent = caseKey;
+            label.textContent = getCaseLabel(selector, caseKey);
             caseRow.appendChild(label);
 
             const rowContent = document.createElement("div");

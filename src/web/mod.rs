@@ -7,7 +7,7 @@ use axum::{
     routing::{delete, get, post},
     Extension, Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use tokio::net::TcpListener;
 use tracing::info;
 
@@ -15,6 +15,19 @@ use crate::store::{
     StoreError, SubstitutionUpdate, TranslationRecord, TranslationUpdate, TranslationValue,
     XcStringsStore, XcStringsStoreManager,
 };
+
+/// Custom deserializer for Option<Option<T>> that properly handles JSON null values.
+/// - JSON null -> Some(None) (explicitly set to null/delete)
+/// - JSON value -> Some(Some(value)) (update with value)
+/// - Missing field handled by serde(default) -> None (don't update)
+fn deserialize_explicit_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    // This deserializes JSON null as Some(None) and actual values as Some(Some(value))
+    Ok(Some(Option::<T>::deserialize(deserializer)?))
+}
 
 #[derive(Debug, Serialize)]
 struct ErrorResponse {
@@ -62,9 +75,17 @@ struct UpsertRequest {
     language: String,
     #[serde(default)]
     path: Option<String>,
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     value: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     state: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
@@ -72,11 +93,19 @@ struct UpsertRequest {
     substitutions: Option<BTreeMap<String, Option<SubstitutionUpdatePayload>>>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 struct VariationUpdatePayload {
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     value: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     state: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
@@ -115,15 +144,31 @@ impl VariationUpdatePayload {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize)]
 struct SubstitutionUpdatePayload {
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     value: Option<Option<String>>,
-    #[serde(default)]
+    #[serde(
+        deserialize_with = "deserialize_explicit_option",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     state: Option<Option<String>>,
-    #[serde(rename = "argNum", default)]
+    #[serde(
+        rename = "argNum",
+        default,
+        deserialize_with = "deserialize_explicit_option"
+    )]
     arg_num: Option<Option<i64>>,
-    #[serde(rename = "formatSpecifier", default)]
+    #[serde(
+        rename = "formatSpecifier",
+        default,
+        deserialize_with = "deserialize_explicit_option"
+    )]
     format_specifier: Option<Option<String>>,
     #[serde(default)]
     variations: Option<BTreeMap<String, BTreeMap<String, VariationUpdatePayload>>>,
@@ -454,3 +499,199 @@ impl IntoResponse for ApiError {
 }
 
 const INDEX_HTML: &str = include_str!("index.html");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_variation_with_null_value() {
+        // Test that JSON with "value": null deserializes to Some(None)
+        let json_str = r#"{
+            "value": null,
+            "state": null
+        }"#;
+
+        let payload: VariationUpdatePayload = serde_json::from_str(json_str).unwrap();
+        assert_eq!(
+            payload.value,
+            Some(None),
+            "null value should deserialize to Some(None)"
+        );
+        assert_eq!(
+            payload.state,
+            Some(None),
+            "null state should deserialize to Some(None)"
+        );
+    }
+
+    #[test]
+    fn deserialize_variation_without_value() {
+        // Test that JSON without value field deserializes to None
+        let json_str = r#"{}"#;
+
+        let payload: VariationUpdatePayload = serde_json::from_str(json_str).unwrap();
+        assert_eq!(
+            payload.value, None,
+            "missing value should deserialize to None"
+        );
+        assert_eq!(
+            payload.state, None,
+            "missing state should deserialize to None"
+        );
+    }
+
+    #[test]
+    fn deserialize_variation_with_string_value() {
+        // Test that JSON with actual string value works
+        let json_str = r#"{
+            "value": "Hello",
+            "state": "translated"
+        }"#;
+
+        let payload: VariationUpdatePayload = serde_json::from_str(json_str).unwrap();
+        assert_eq!(payload.value, Some(Some("Hello".to_string())));
+        assert_eq!(payload.state, Some(Some("translated".to_string())));
+    }
+
+    #[test]
+    fn deserialize_upsert_request_with_plural_deletion() {
+        // Test the actual request structure sent by the frontend for plural deletion
+        let json_str = r#"{
+            "key": "test.key",
+            "language": "en",
+            "variations": {
+                "plural": {
+                    "one": {
+                        "value": null
+                    }
+                }
+            }
+        }"#;
+
+        let request: UpsertRequest = serde_json::from_str(json_str).unwrap();
+        assert!(request.variations.is_some());
+
+        let variations = request.variations.unwrap();
+        let plural = variations.get("plural").unwrap();
+        let one_case = plural.get("one").unwrap();
+
+        assert_eq!(
+            one_case.value,
+            Some(None),
+            "null value in variation should be Some(None)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_web_api_delete_plural_variation() {
+        use crate::store::XcStringsStore;
+        use std::env;
+        use std::path::PathBuf;
+        use tokio::fs;
+
+        // Create a temporary test file
+        let test_file = PathBuf::from(env::temp_dir()).join(format!(
+            "test_web_api_delete_plural_{}.xcstrings",
+            std::process::id()
+        ));
+
+        // Initial content with plural variations
+        let initial_content = r#"{
+            "sourceLanguage": "en",
+            "version": "1.0",
+            "strings": {
+                "items.count": {
+                    "localizations": {
+                        "en": {
+                            "variations": {
+                                "plural": {
+                                    "one": {
+                                        "stringUnit": {
+                                            "state": "translated",
+                                            "value": "1 item"
+                                        }
+                                    },
+                                    "other": {
+                                        "stringUnit": {
+                                            "state": "translated",
+                                            "value": "%d items"
+                                        }
+                                    },
+                                    "zero": {
+                                        "stringUnit": {
+                                            "state": "translated",
+                                            "value": "No items"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }"#;
+
+        fs::write(&test_file, initial_content).await.unwrap();
+
+        // Load the store directly
+        let store = Arc::new(XcStringsStore::load_or_create(&test_file).await.unwrap());
+
+        // Test deleting the "one" plural case using the store directly
+        let delete_update = TranslationUpdate {
+            value: None,
+            state: None,
+            variations: Some({
+                let mut variations = BTreeMap::new();
+                let mut plural_cases = BTreeMap::new();
+                plural_cases.insert(
+                    "one".to_string(),
+                    TranslationUpdate {
+                        value: Some(None), // Explicitly set to None to delete
+                        state: Some(None),
+                        variations: None,
+                        substitutions: None,
+                    },
+                );
+                variations.insert("plural".to_string(), plural_cases);
+                variations
+            }),
+            substitutions: None,
+        };
+
+        // Apply the update
+        store
+            .upsert_translation("items.count", "en", delete_update)
+            .await
+            .unwrap();
+
+        // Verify the "one" case was deleted
+        let translation = store
+            .get_translation("items.count", "en")
+            .await
+            .unwrap()
+            .unwrap();
+
+        let plural_vars = translation.variations.get("plural").unwrap();
+        assert_eq!(
+            plural_vars.len(),
+            2,
+            "Should have 2 plural cases left (other and zero)"
+        );
+        assert!(
+            !plural_vars.contains_key("one"),
+            "The 'one' case should be deleted"
+        );
+        assert!(
+            plural_vars.contains_key("other"),
+            "The 'other' case should remain"
+        );
+        assert!(
+            plural_vars.contains_key("zero"),
+            "The 'zero' case should remain"
+        );
+
+        // Clean up
+        let _ = tokio::fs::remove_file(&test_file).await;
+    }
+}

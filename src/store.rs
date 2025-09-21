@@ -2216,4 +2216,97 @@ mod tests {
         assert!(plural_vars.contains_key("one"));
         assert!(plural_vars.contains_key("other"));
     }
+
+    #[tokio::test]
+    async fn delete_plural_variation_with_null_value() {
+        let tmp = TempStorePath::new("delete_plural_null");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        // First, create a translation with plural variations
+        let initial = TranslationUpdate::from_value_state(None, None)
+            .add_variation(
+                "plural",
+                "one",
+                TranslationUpdate::from_value_state(
+                    Some("One item".into()),
+                    Some("translated".into()),
+                ),
+            )
+            .add_variation(
+                "plural",
+                "other",
+                TranslationUpdate::from_value_state(
+                    Some("%d items".into()),
+                    Some("translated".into()),
+                ),
+            );
+
+        store
+            .upsert_translation("items.count", "en", initial)
+            .await
+            .expect("create initial");
+
+        // Verify both plural forms exist
+        let result = store
+            .get_translation("items.count", "en")
+            .await
+            .expect("fetch initial")
+            .expect("translation exists");
+
+        let plural_vars = result.variations.get("plural").expect("has plural");
+        assert_eq!(plural_vars.len(), 2);
+        assert!(plural_vars.contains_key("one"));
+        assert!(plural_vars.contains_key("other"));
+
+        // Now delete the "one" case by setting value to None
+        let delete_one = TranslationUpdate {
+            value: None,
+            state: None,
+            variations: Some({
+                let mut variations = BTreeMap::new();
+                let mut plural_cases = BTreeMap::new();
+                plural_cases.insert(
+                    "one".to_string(),
+                    TranslationUpdate {
+                        value: Some(None), // Explicitly set to None to delete
+                        state: Some(None),
+                        variations: None,
+                        substitutions: None,
+                    },
+                );
+                variations.insert("plural".to_string(), plural_cases);
+                variations
+            }),
+            substitutions: None,
+        };
+
+        store
+            .upsert_translation("items.count", "en", delete_one)
+            .await
+            .expect("delete one case");
+
+        // Verify only "other" case remains
+        let result = store
+            .get_translation("items.count", "en")
+            .await
+            .expect("fetch after delete")
+            .expect("translation still exists");
+
+        let plural_vars = result.variations.get("plural").expect("still has plural");
+        assert_eq!(
+            plural_vars.len(),
+            1,
+            "Should have only one plural case left"
+        );
+        assert!(
+            !plural_vars.contains_key("one"),
+            "One case should be deleted"
+        );
+        assert!(
+            plural_vars.contains_key("other"),
+            "Other case should remain"
+        );
+    }
 }

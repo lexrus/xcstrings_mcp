@@ -7,13 +7,15 @@ A Rust implementation of a Model Context Protocol (MCP) server designed for work
 ## Features
 
 - Async-safe store that loads and persists `Localizable.xcstrings` JSON on every change.
-- MCP toolset for listing, retrieving, creating, updating, and deleting translations (including plural variations) and comments.
+- MCP toolset for listing, retrieving, creating, updating, and deleting translations (including plural and device variations) and comments.
 - Tool for enumerating all languages discovered in the file.
-- Embedded Axum web UI for browsing translations, filtering by query, editing values, plural variations, and managing comments.
+- Embedded Axum web UI for browsing translations, filtering by query, editing values, plural/device variations, and managing comments.
 - Automatic discovery of `.xcstrings` files when no default path is provided, with a selector in the web UI so you can switch catalogs at runtime.
+- Support for device-specific variations (iPhone, iPad, Mac, Apple Watch, etc.) with mutual exclusivity logic between plural and device variations at the translation level.
 - Inline editing for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases) — all consistently exposed via the web UI and MCP tools.
 
 The browser UI surfaces these controls alongside each key: toggle the extraction state, adjust per-language review state, and manage substitution metadata without leaving the page.
+
 - JSON-first responses from tools to make automation and debugging easier.
 - Schema-backed validation using the vendored [`xcstrings.schema.json`](schema/xcstrings.schema.json) keeps generated catalogs consistent with Apple’s format.
 
@@ -67,7 +69,7 @@ When calling `upsert_translation`, you can send:
 
 - `variations` — map selectors (e.g. `"plural"`) to their cases; each case is another translation update.
 - `substitutions` — map substitution identifiers (`"arg1"`, `"device"`, etc.) to updates containing `value`, `state`, `argNum`, `formatSpecifier`, and nested `variations`.
-Missing selectors or substitutions are left untouched so you can patch individual pieces without resending the entire localization payload.
+  Missing selectors or substitutions are left untouched so you can patch individual pieces without resending the entire localization payload.
 
 If the server starts without a default path (no CLI argument and no `STRINGS_PATH`), it scans the working tree for `.xcstrings` files and surfaces them through the web UI selector. When none are found, the UI shows a placeholder until a file appears. MCP tools still require an explicit `path` in this mode. Providing a default path pins the selector to that file and lets tool calls omit `path`.
 

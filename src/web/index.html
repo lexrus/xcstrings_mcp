@@ -1519,6 +1519,12 @@
                       bucket.push(entry.value);
                     }
                   });
+                  const device = translation.variations?.device || {};
+                  Object.values(device).forEach((entry) => {
+                    if (entry?.value) {
+                      bucket.push(entry.value);
+                    }
+                  });
                   const substitutions = translation.substitutions || {};
                   Object.values(substitutions).forEach((sub) => {
                     if (sub?.value) {
@@ -1526,6 +1532,12 @@
                     }
                     const subPlural = sub?.variations?.plural || {};
                     Object.values(subPlural).forEach((entry) => {
+                      if (entry?.value) {
+                        bucket.push(entry.value);
+                      }
+                    });
+                    const subDevice = sub?.variations?.device || {};
+                    Object.values(subDevice).forEach((entry) => {
                       if (entry?.value) {
                         bucket.push(entry.value);
                       }
@@ -2181,7 +2193,12 @@
 
           const pluralVariations =
             (translation.variations && translation.variations.plural) || {};
+          const deviceVariations =
+            (translation.variations && translation.variations.device) || {};
           const pluralKeys = Object.keys(pluralVariations);
+          const deviceKeys = Object.keys(deviceVariations);
+
+          // Display plural variations
           if (pluralKeys.length) {
             const pluralList = document.createElement("div");
             pluralList.className = "plural-list";
@@ -2277,11 +2294,116 @@
             translationDetailsHasContent = true;
           }
 
+          // Display device variations
+          if (deviceKeys.length) {
+            const deviceList = document.createElement("div");
+            deviceList.className = "plural-list"; // Reuse plural styling
+
+            deviceKeys.forEach((caseKey) => {
+              const entry = deviceVariations[caseKey] || {};
+              const row = document.createElement("div");
+              row.className = "plural-row";
+
+              const label = document.createElement("label");
+              label.textContent = `device: ${getCaseLabel("device", caseKey)}`;
+              row.appendChild(label);
+
+              const rowContent = document.createElement("div");
+              rowContent.className = "plural-row-content";
+
+              const variantTextarea = document.createElement("textarea");
+              variantTextarea.rows = 1;
+              variantTextarea.value = entry.value || "";
+              variantTextarea.addEventListener("change", async (event) => {
+                if (!activeKey) {
+                  setStatus(
+                    "Set a key before saving device translations",
+                    true,
+                  );
+                  variantTextarea.value = entry.value || "";
+                  return;
+                }
+                const updates = { device: {} };
+                updates.device[caseKey] = { value: event.target.value };
+                try {
+                  await upsertTranslation(
+                    {
+                      key: activeKey,
+                      language: state.currentLanguage,
+                      variations: updates,
+                    },
+                    `Device '${getCaseLabel("device", caseKey)}' saved`,
+                  );
+                  if (isDraft) {
+                    dropDraft(item.__draftId);
+                    captureScrollPosition();
+                    await fetchTranslations(
+                      document.getElementById("search").value,
+                    );
+                  } else {
+                    entry.value = event.target.value;
+                  }
+                } catch (error) {
+                  setStatus(error.message, true);
+                  variantTextarea.value = entry.value || "";
+                }
+              });
+              rowContent.appendChild(variantTextarea);
+              requestAnimationFrame(() => initAutoResize(variantTextarea));
+
+              const deleteVariant = document.createElement("button");
+              deleteVariant.type = "button";
+              deleteVariant.className = "icon-button danger";
+              deleteVariant.title = `Remove ${getCaseLabel("device", caseKey)} device`;
+              deleteVariant.textContent = "×";
+              deleteVariant.addEventListener("click", async () => {
+                if (!activeKey) {
+                  setStatus("Set a key before removing device forms", true);
+                  return;
+                }
+                const updates = { device: {} };
+                updates.device[caseKey] = { value: null };
+                try {
+                  await upsertTranslation(
+                    {
+                      key: activeKey,
+                      language: state.currentLanguage,
+                      variations: updates,
+                    },
+                    `Device '${getCaseLabel("device", caseKey)}' removed`,
+                  );
+                  captureScrollPosition();
+                  await fetchTranslations(
+                    document.getElementById("search").value,
+                  );
+                } catch (error) {
+                  setStatus(error.message, true);
+                }
+              });
+              rowContent.appendChild(deleteVariant);
+
+              row.appendChild(rowContent);
+              deviceList.appendChild(row);
+            });
+
+            translationDetails.appendChild(deviceList);
+            translationDetailsHasContent = true;
+          }
+
           const availablePluralCases = PLURAL_CASES.filter(
             (caseKey) => !pluralKeys.includes(caseKey),
           );
+          const availableDeviceCases = DEVICE_CASES.filter(
+            (caseKey) => !deviceKeys.includes(caseKey),
+          );
           const keyToolsContainer = keyDetails.querySelector(".key-tools");
-          if (keyToolsContainer && availablePluralCases.length) {
+
+          // Show "+ Plural" button only if there are no device variations
+          if (
+            keyToolsContainer &&
+            availablePluralCases.length &&
+            deviceKeys.length === 0
+          ) {
             const addPluralBtn = document.createElement("button");
             addPluralBtn.type = "button";
             addPluralBtn.className = "icon-button";
@@ -2341,6 +2463,74 @@
             });
 
             keyToolsContainer.appendChild(addPluralBtn);
+            keyToolsContainer.appendChild(picker);
+          }
+
+          // Show "+ Device" button only if there are no plural variations
+          if (
+            keyToolsContainer &&
+            availableDeviceCases.length &&
+            pluralKeys.length === 0
+          ) {
+            const addDeviceBtn = document.createElement("button");
+            addDeviceBtn.type = "button";
+            addDeviceBtn.className = "icon-button";
+            addDeviceBtn.title = "Add device form";
+            addDeviceBtn.textContent = "＋ Device";
+
+            const picker = document.createElement("div");
+            picker.className = "plural-picker hidden"; // Reuse plural picker styling
+
+            addDeviceBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              if (!activeKey) {
+                setStatus("Set a key before adding device forms", true);
+                return;
+              }
+              picker.classList.toggle("hidden");
+            });
+
+            document.addEventListener("click", (event) => {
+              if (!keyTools.contains(event.target)) {
+                picker.classList.add("hidden");
+              }
+            });
+
+            availableDeviceCases.forEach((caseKey) => {
+              const optionBtn = document.createElement("button");
+              optionBtn.type = "button";
+              optionBtn.className = "plural-option"; // Reuse plural option styling
+              optionBtn.textContent = getCaseLabel("device", caseKey);
+              optionBtn.addEventListener("click", async () => {
+                if (!activeKey) {
+                  setStatus("Set a key before adding device forms", true);
+                  picker.classList.add("hidden");
+                  return;
+                }
+                const updates = { device: {} };
+                updates.device[caseKey] = { value: "", state: "new" };
+                try {
+                  await upsertTranslation(
+                    {
+                      key: activeKey,
+                      language: state.currentLanguage,
+                      variations: updates,
+                    },
+                    `Device '${getCaseLabel("device", caseKey)}' added`,
+                  );
+                  picker.classList.add("hidden");
+                  captureScrollPosition();
+                  await fetchTranslations(
+                    document.getElementById("search").value,
+                  );
+                } catch (error) {
+                  setStatus(error.message, true);
+                }
+              });
+              picker.appendChild(optionBtn);
+            });
+
+            keyToolsContainer.appendChild(addDeviceBtn);
             keyToolsContainer.appendChild(picker);
           }
 

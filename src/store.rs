@@ -375,6 +375,67 @@ fn localization_is_empty(loc: &XcLocalization) -> bool {
         && loc.substitutions.is_empty()
 }
 
+/// Context for variation validation to enforce schema constraints
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum VariationContext {
+    TopLevel,
+    NestedUnderPlural,
+    NestedUnderDevice,
+}
+
+/// Validates and normalizes variations according to xcstrings schema constraints:
+/// - At top level: Cannot have both "plural" and "device" variations
+/// - Nested under "plural": Cannot have "device" variations
+/// - Nested under "device": Cannot have another "device" variation (but can have "plural")
+fn validate_and_normalize_variations(
+    variations: &mut BTreeMap<String, BTreeMap<String, XcLocalization>>,
+    context: VariationContext,
+) {
+    // First, recursively normalize nested localizations
+    for (selector, cases) in variations.iter_mut() {
+        // Determine context for nested variations
+        let nested_context = match (context, selector.as_str()) {
+            (VariationContext::TopLevel, "plural") => VariationContext::NestedUnderPlural,
+            (VariationContext::TopLevel, "device") => VariationContext::NestedUnderDevice,
+            (VariationContext::NestedUnderDevice, "plural") => VariationContext::NestedUnderPlural,
+            _ => context, // Other selectors maintain current context
+        };
+
+        cases.retain(|_, nested| {
+            // Recursively normalize nested localizations
+            !normalize_localization_inner(nested, nested_context)
+        });
+    }
+
+    // Apply context-specific validation rules
+    match context {
+        VariationContext::TopLevel => {
+            // Cannot have both "plural" and "device" at top level
+            if variations.contains_key("plural") && variations.contains_key("device") {
+                eprintln!("Warning: Invalid variation combination - cannot have both 'plural' and 'device' at top level. Removing 'device'.");
+                variations.remove("device");
+            }
+        }
+        VariationContext::NestedUnderPlural => {
+            // Cannot have "device" when nested under "plural"
+            if variations.contains_key("device") {
+                eprintln!("Warning: Invalid variation - cannot have 'device' nested under 'plural'. Removing 'device'.");
+                variations.remove("device");
+            }
+        }
+        VariationContext::NestedUnderDevice => {
+            // Cannot have another "device" when already nested under "device"
+            if variations.contains_key("device") {
+                eprintln!("Warning: Invalid variation - cannot have 'device' nested under another 'device'. Removing nested 'device'.");
+                variations.remove("device");
+            }
+        }
+    }
+
+    // Remove empty variation sets
+    variations.retain(|_, cases| !cases.is_empty());
+}
+
 fn normalize_substitution(sub: &mut XcSubstitution) -> bool {
     if let Some(unit) = sub.string_unit.as_mut() {
         sanitize_string_unit(unit);
@@ -389,15 +450,17 @@ fn normalize_substitution(sub: &mut XcSubstitution) -> bool {
         sub.string_unit = None;
     }
 
-    sub.variations.retain(|_, cases| {
-        cases.retain(|_, nested| !normalize_localization(nested));
-        !cases.is_empty()
-    });
+    // Validate and normalize variations (substitutions follow same rules as top-level)
+    validate_and_normalize_variations(&mut sub.variations, VariationContext::TopLevel);
 
     substitution_is_empty(sub)
 }
 
 fn normalize_localization(loc: &mut XcLocalization) -> bool {
+    normalize_localization_inner(loc, VariationContext::TopLevel)
+}
+
+fn normalize_localization_inner(loc: &mut XcLocalization, context: VariationContext) -> bool {
     if let Some(unit) = loc.string_unit.as_mut() {
         sanitize_string_unit(unit);
     }
@@ -411,10 +474,8 @@ fn normalize_localization(loc: &mut XcLocalization) -> bool {
         loc.string_unit = None;
     }
 
-    loc.variations.retain(|_, cases| {
-        cases.retain(|_, nested| !normalize_localization(nested));
-        !cases.is_empty()
-    });
+    // Validate and normalize variations with appropriate context
+    validate_and_normalize_variations(&mut loc.variations, context);
 
     loc.substitutions
         .retain(|_, sub| !normalize_substitution(sub));
@@ -492,6 +553,9 @@ fn apply_update(target: &mut XcLocalization, update: TranslationUpdate) {
                 .into_iter()
                 .filter(|(_, cases)| !cases.is_empty()),
         );
+
+        // Validate the resulting variations
+        validate_and_normalize_variations(&mut target.variations, VariationContext::TopLevel);
     }
 
     if let Some(substitutions) = update.substitutions {
@@ -577,6 +641,9 @@ fn apply_substitution_update(target: &mut XcSubstitution, update: SubstitutionUp
                 .into_iter()
                 .filter(|(_, cases)| !cases.is_empty()),
         );
+
+        // Validate the resulting variations for substitutions (same rules as TopLevel)
+        validate_and_normalize_variations(&mut target.variations, VariationContext::TopLevel);
     }
 }
 
@@ -1859,7 +1926,294 @@ mod tests {
         let content = fs::read_to_string(&path).await.unwrap();
         assert!(content.contains("\"variations\""));
         assert!(content.contains("\"plural\""));
-        assert!(content.contains("\"one\""));
-        assert!(content.contains("\"other\""));
+        assert!(content.contains("\"variations\""));
+        assert!(content.contains("\"plural\""));
+    }
+
+    #[tokio::test]
+    async fn test_variation_constraints_top_level_plural_and_device() {
+        // Test that plural and device cannot coexist at top level
+        let tmp = TempStorePath::new("variation_constraints_top");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Try to create a translation with both plural and device at top level
+        let mut update = TranslationUpdate::default();
+        let mut variations = BTreeMap::new();
+
+        // Add plural variations
+        let mut plural_cases = BTreeMap::new();
+        plural_cases.insert(
+            "one".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("One item".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        plural_cases.insert(
+            "other".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("Many items".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        variations.insert("plural".to_string(), plural_cases);
+
+        // Add device variations (should be rejected)
+        let mut device_cases = BTreeMap::new();
+        device_cases.insert(
+            "iphone".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("iPhone version".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        variations.insert("device".to_string(), device_cases);
+
+        update.variations = Some(
+            variations
+                .into_iter()
+                .map(|(k, v)| {
+                    let cases = v
+                        .into_iter()
+                        .map(|(case_key, loc)| {
+                            (
+                                case_key,
+                                TranslationUpdate::from(TranslationValue::from_localization(&loc)),
+                            )
+                        })
+                        .collect();
+                    (k, cases)
+                })
+                .collect(),
+        );
+
+        let result = store
+            .upsert_translation("test.key", "en", update)
+            .await
+            .unwrap();
+
+        // Verify that only plural remains (device should be removed)
+        assert!(result.variations.contains_key("plural"));
+        assert!(!result.variations.contains_key("device"));
+    }
+
+    #[tokio::test]
+    async fn test_variation_constraints_no_device_under_plural() {
+        // Test that device cannot be nested under plural
+        let tmp = TempStorePath::new("variation_constraints_nested_plural");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Create a translation with device nested under plural (should be rejected)
+        let mut update = TranslationUpdate::default();
+        let mut variations = BTreeMap::new();
+
+        let mut plural_cases = BTreeMap::new();
+        let mut one_loc = XcLocalization::default();
+        one_loc.string_unit = Some(XcStringUnit {
+            value: Some("One".to_string()),
+            state: Some("translated".to_string()),
+        });
+
+        // Try to add device variation under plural/one (should be rejected)
+        let mut device_cases = BTreeMap::new();
+        device_cases.insert(
+            "iphone".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("iPhone One".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        one_loc
+            .variations
+            .insert("device".to_string(), device_cases);
+
+        plural_cases.insert("one".to_string(), one_loc);
+        variations.insert("plural".to_string(), plural_cases);
+
+        update.variations = Some(
+            variations
+                .into_iter()
+                .map(|(k, v)| {
+                    let cases = v
+                        .into_iter()
+                        .map(|(case_key, loc)| {
+                            (
+                                case_key,
+                                TranslationUpdate::from(TranslationValue::from_localization(&loc)),
+                            )
+                        })
+                        .collect();
+                    (k, cases)
+                })
+                .collect(),
+        );
+
+        let result = store
+            .upsert_translation("test.key2", "en", update)
+            .await
+            .unwrap();
+
+        // Verify that device was removed from under plural
+        let plural_vars = result.variations.get("plural").unwrap();
+        let one_var = plural_vars.get("one").unwrap();
+        assert!(!one_var.variations.contains_key("device"));
+    }
+
+    #[tokio::test]
+    async fn test_variation_constraints_no_device_under_device() {
+        // Test that device cannot be nested under another device
+        let tmp = TempStorePath::new("variation_constraints_nested_device");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Create a translation with device nested under device (should be rejected)
+        let mut update = TranslationUpdate::default();
+        let mut variations = BTreeMap::new();
+
+        let mut device_cases = BTreeMap::new();
+        let mut iphone_loc = XcLocalization::default();
+        iphone_loc.string_unit = Some(XcStringUnit {
+            value: Some("iPhone".to_string()),
+            state: Some("translated".to_string()),
+        });
+
+        // Try to add another device variation under device/iphone (should be rejected)
+        let mut nested_device = BTreeMap::new();
+        nested_device.insert(
+            "ipad".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("Nested iPad".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        iphone_loc
+            .variations
+            .insert("device".to_string(), nested_device);
+
+        device_cases.insert("iphone".to_string(), iphone_loc);
+        variations.insert("device".to_string(), device_cases);
+
+        update.variations = Some(
+            variations
+                .into_iter()
+                .map(|(k, v)| {
+                    let cases = v
+                        .into_iter()
+                        .map(|(case_key, loc)| {
+                            (
+                                case_key,
+                                TranslationUpdate::from(TranslationValue::from_localization(&loc)),
+                            )
+                        })
+                        .collect();
+                    (k, cases)
+                })
+                .collect(),
+        );
+
+        let result = store
+            .upsert_translation("test.key3", "en", update)
+            .await
+            .unwrap();
+
+        // Verify that nested device was removed
+        let device_vars = result.variations.get("device").unwrap();
+        let iphone_var = device_vars.get("iphone").unwrap();
+        assert!(!iphone_var.variations.contains_key("device"));
+    }
+
+    #[tokio::test]
+    async fn test_variation_constraints_plural_allowed_under_device() {
+        // Test that plural IS allowed under device
+        let tmp = TempStorePath::new("variation_constraints_plural_under_device");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Create a translation with plural nested under device (should be allowed)
+        let mut update = TranslationUpdate::default();
+        let mut variations = BTreeMap::new();
+
+        let mut device_cases = BTreeMap::new();
+        let mut iphone_loc = XcLocalization::default();
+
+        // Add plural variation under device/iphone (should be allowed)
+        let mut plural_cases = BTreeMap::new();
+        plural_cases.insert(
+            "one".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("One item on iPhone".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        plural_cases.insert(
+            "other".to_string(),
+            XcLocalization {
+                string_unit: Some(XcStringUnit {
+                    value: Some("Many items on iPhone".to_string()),
+                    state: Some("translated".to_string()),
+                }),
+                variations: BTreeMap::new(),
+                substitutions: BTreeMap::new(),
+            },
+        );
+        iphone_loc
+            .variations
+            .insert("plural".to_string(), plural_cases);
+
+        device_cases.insert("iphone".to_string(), iphone_loc);
+        variations.insert("device".to_string(), device_cases);
+
+        update.variations = Some(
+            variations
+                .into_iter()
+                .map(|(k, v)| {
+                    let cases = v
+                        .into_iter()
+                        .map(|(case_key, loc)| {
+                            (
+                                case_key,
+                                TranslationUpdate::from(TranslationValue::from_localization(&loc)),
+                            )
+                        })
+                        .collect();
+                    (k, cases)
+                })
+                .collect(),
+        );
+
+        let result = store
+            .upsert_translation("test.key4", "en", update)
+            .await
+            .unwrap();
+
+        // Verify that plural under device was preserved
+        let device_vars = result.variations.get("device").unwrap();
+        let iphone_var = device_vars.get("iphone").unwrap();
+        assert!(iphone_var.variations.contains_key("plural"));
+        let plural_vars = iphone_var.variations.get("plural").unwrap();
+        assert!(plural_vars.contains_key("one"));
+        assert!(plural_vars.contains_key("other"));
     }
 }

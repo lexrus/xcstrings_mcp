@@ -1,27 +1,101 @@
 # xcstrings-mcp
 
-A Rust implementation of a Model Context Protocol (MCP) server designed for working with Xcode `Localizable.xcstrings` files. It exposes the translation catalog as MCP tools and also serves a lightweight web UI so teams can browse, search, and edit strings from a browser.
+[![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub Stars](https://img.shields.io/github/stars/lexrus/xcstrings_mcp.svg)](https://github.com/lexrus/xcstrings_mcp/stargazers)
 
-![screenshot_alpha](screenshots/screenshot_alpha.jpg)
+A Rust implementation of a __Model Context Protocol (MCP) server__ designed for working with Xcode `.xcstrings` files. It exposes the translation catalog as MCP tools and also serves a __lightweight web editor__ so teams can browse, search, and edit strings from a browser.
 
-## Features
+> **Note**: This project was created with AI assistance using tools like Codex and Claude Code. While we strive for quality, there may be issues or areas for improvement. We welcome bug reports, feature requests, and contributions via [GitHub Issues](https://github.com/lexrus/xcstrings_mcp/issues).
 
-- Async-safe store that loads and persists `Localizable.xcstrings` JSON on every change.
-- MCP toolset for listing, retrieving, creating, updating, and deleting translations (including plural and device variations) and comments.
-- Tool for enumerating all languages discovered in the file.
-- Embedded Axum web UI for browsing translations, filtering by query, editing values, plural/device variations, and managing comments.
-- Automatic discovery of `.xcstrings` files when no default path is provided, with a selector in the web UI so you can switch catalogs at runtime.
-- Support for device-specific variations (iPhone, iPad, Mac, Apple Watch, etc.) with mutual exclusivity logic between plural and device variations at the translation level.
-- Inline editing for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases) — all consistently exposed via the web UI and MCP tools.
+![screenshot_alpha](screenshots/mcp_server.png)
+![screenshot_alpha](screenshots/web_editor.png)
 
-The browser UI surfaces these controls alongside each key: toggle the extraction state, adjust per-language review state, and manage substitution metadata without leaving the page.
+## Functions
 
-- JSON-first responses from tools to make automation and debugging easier.
-- Schema-backed validation using the vendored [`xcstrings.schema.json`](schema/xcstrings.schema.json) keeps generated catalogs consistent with Apple’s format.
+This MCP server provides the following functions for managing Xcode `Localizable.xcstrings` files:
+
+### Core Translation Functions
+
+- **`list_translations(path, query?, limit?, include_values?)`** - List translation entries with optional filtering
+  - `path`: Path to the `.xcstrings` file
+  - `query`: Optional case-insensitive search query to filter results
+  - `limit`: Maximum number of items to return (defaults to 100, set to 0 for no limit)
+  - `include_values`: Include full translation payloads (defaults to false for compact summaries)
+  - Returns: JSON array of translation summaries or full records
+
+- **`get_translation(path, key, language)`** - Fetch a single translation by key and language
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `language`: Language code (e.g., "en", "fr", "es")
+  - Returns: Complete translation value with variations and substitutions
+
+- **`upsert_translation(path, key, language, value?, state?, variations?, substitutions?)`** - Create or update a translation
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `language`: Language code
+  - `value`: Translation text (optional)
+  - `state`: Translation state (optional)
+  - `variations`: Map of variation selectors to their cases (e.g., plural forms)
+  - `substitutions`: Map of substitution identifiers with metadata
+  - Returns: Updated translation value
+
+- **`delete_translation(path, key, language)`** - Delete a translation for a specific language
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `language`: Language code to remove
+  - Returns: Success confirmation
+
+### Key Management Functions
+
+- **`delete_key(path, key)`** - Delete an entire translation key across all languages
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier to remove completely
+  - Returns: Success confirmation
+
+- **`set_comment(path, key, comment?)`** - Set or clear the developer comment for a translation key
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `comment`: Developer comment text (optional, omit to clear)
+  - Returns: Success confirmation
+
+- **`set_extraction_state(path, key, extractionState?)`** - Set or clear the extraction state for a string key
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `extractionState`: Extraction state value (optional, omit to clear)
+  - Returns: Success confirmation
+
+### Language Management Functions
+
+- **`list_languages(path)`** - List all languages present in the xcstrings file
+  - `path`: Path to the `.xcstrings` file
+  - Returns: JSON array of language codes found in the catalog
+
+### Additional Features
+
+- **Async-safe store** that loads and persists `Localizable.xcstrings` JSON on every change
+- **Embedded Axum web UI** for browsing translations, filtering by query, editing values, plural/device variations, and managing comments
+- **Automatic discovery** of `.xcstrings` files when no default path is provided, with a selector in the web UI for runtime catalog switching
+- **Device-specific variations** support (iPhone, iPad, Mac, Apple Watch, etc.) with mutual exclusivity logic between plural and device variations
+- **Inline editing** for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases)
+- **JSON-first responses** from all tools to make automation and debugging easier
+- **Schema-backed validation** using the vendored [`xcstrings.schema.json`](schema/xcstrings.schema.json) to keep generated catalogs consistent with Apple's format
 
 ## Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.75 or newer.
+- **Rust 1.75 or newer**: Install using Homebrew (recommended on macOS):
+
+  ```bash
+  brew install rust
+  ```
+
+  Alternatively, install using the official installer:
+
+  ```bash
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+  ```
+
+  After installation, restart your terminal or run `source ~/.cargo/env` to update your PATH.
 
 ## Running the server
 
@@ -75,7 +149,11 @@ If the server starts without a default path (no CLI argument and no `STRINGS_PAT
 
 ### Integrating with AI tools
 
-Modern MCP-aware AI clients let you register external servers through a JSON manifest. As an example, the following snippet adds `xcstrings-mcp` to Claude Desktop — copy it into `~/Library/Application Support/Claude/claude_desktop_config.json` (creating the file if it does not exist) and adjust the command path to match your environment:
+Modern MCP-aware AI clients let you register external servers through a JSON manifest. As an example, the following snippet adds `xcstrings-mcp` to Claude Code:
+
+`claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio","env":{"WEB_HOST": "127.0.0.1","WEB_PORT": "8787"}}'`
+
+You can also add it manually to `~/.claude.json`:
 
 ```json
 {
@@ -92,7 +170,7 @@ Modern MCP-aware AI clients let you register external servers through a JSON man
 }
 ```
 
-Restart the client after saving so it loads the new MCP server definition. During tool calls, include a `path` field (for example `"path": "/Users/you/Projects/Localizable.xcstrings"`) so the server knows which localization file to open. Other tools that support the Model Context Protocol use a similar JSON representation—point the `command` to the built binary and pass any arguments or environment overrides you need.
+Restart the client after saving so it loads the new MCP server definition. The `path` parameter is optional in tool calls—if not provided, the server will automatically discover all `.xcstrings` files in your project and list them in the web editor for selection.
 
 To run with a default localization file (enabling the embedded web UI and letting tools omit `path`), bake the location into the definition instead:
 
@@ -135,6 +213,12 @@ The repository vendors the official schema as a git submodule under `schema/`. U
 - `src/mcp_server.rs` – MCP tool definitions exposing translation functionality.
 - `src/web/mod.rs` – Axum HTTP routes and HTML/JS single page view.
 - `src/main.rs` – entrypoint that launches both web and MCP services.
+
+## Support
+
+If you find this project useful, consider supporting me by buying me a coffee.
+
+<a href="https://www.buymeacoffee.com/lexrus" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 ## License
 

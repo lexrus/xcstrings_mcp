@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 use crate::store::{
-    StoreError, SubstitutionUpdate, TranslationRecord, TranslationSummary, TranslationUpdate,
-    TranslationValue, XcStringsStore, XcStringsStoreManager,
+    StoreError, SubstitutionUpdate, TranslationSummary, TranslationUpdate, TranslationValue,
+    XcStringsStore, XcStringsStoreManager,
 };
 
 #[derive(Clone)]
@@ -49,6 +49,23 @@ impl XcStringsMcpServer {
             StoreError::KeyExists(key) => {
                 McpError::invalid_params(format!("Key '{key}' already exists"), None)
             }
+            StoreError::LanguageMissing(language) => {
+                McpError::resource_not_found(format!("Language '{language}' not found"), None)
+            }
+            StoreError::LanguageExists(language) => {
+                McpError::invalid_params(format!("Language '{language}' already exists"), None)
+            }
+            StoreError::InvalidLanguage(msg) => {
+                McpError::invalid_params(format!("Invalid language: {msg}"), None)
+            }
+            StoreError::CannotRemoveSourceLanguage(language) => McpError::invalid_params(
+                format!("Cannot remove source language '{language}'"),
+                None,
+            ),
+            StoreError::CannotRenameSourceLanguage(language) => McpError::invalid_params(
+                format!("Cannot rename source language '{language}'"),
+                None,
+            ),
             StoreError::PathRequired => McpError::invalid_params(
                 "xcstrings path must be provided via tool arguments".to_string(),
                 None,
@@ -73,9 +90,6 @@ struct ListTranslationsParams {
     /// Optional maximum number of items to return (defaults to 100)
     #[serde(default)]
     pub limit: Option<u32>,
-    /// Include full translation payloads; defaults to false for compact summaries
-    #[serde(default)]
-    pub include_values: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -242,8 +256,39 @@ struct SetExtractionStateParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct ListKeysParams {
+    pub path: String,
+    /// Optional case-insensitive search query
+    pub query: Option<String>,
+    /// Optional maximum number of items to return (defaults to 100)
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct ListLanguagesParams {
     pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct AddLanguageParams {
+    pub path: String,
+    pub language: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RemoveLanguageParams {
+    pub path: String,
+    pub language: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct UpdateLanguageParams {
+    pub path: String,
+    #[serde(rename = "oldLanguage")]
+    pub old_language: String,
+    #[serde(rename = "newLanguage")]
+    pub new_language: String,
 }
 
 fn to_json_text<T: serde::Serialize>(value: &T) -> String {
@@ -294,33 +339,45 @@ impl XcStringsMcpServer {
             .map(|value| value as usize)
             .unwrap_or(DEFAULT_LIST_LIMIT);
         let limit = if limit == 0 { usize::MAX } else { limit };
-        let include_values = params.include_values.unwrap_or(false);
 
-        if include_values {
-            let records = store.list_records(query).await;
-            let total = records.len();
-            let items: Vec<TranslationRecord> = records.into_iter().take(limit).collect();
-            let truncated = total > items.len();
-            let response = TranslationListResponse {
-                returned: items.len(),
-                total,
-                truncated,
-                items,
-            };
-            Ok(render_json(&response))
-        } else {
-            let summaries = store.list_summaries(query).await;
-            let total = summaries.len();
-            let items: Vec<TranslationSummary> = summaries.into_iter().take(limit).collect();
-            let truncated = total > items.len();
-            let response = TranslationListResponse {
-                returned: items.len(),
-                total,
-                truncated,
-                items,
-            };
-            Ok(render_json(&response))
-        }
+        let summaries = store.list_summaries(query).await;
+        let total = summaries.len();
+        let items: Vec<TranslationSummary> = summaries.into_iter().take(limit).collect();
+        let truncated = total > items.len();
+        let response = TranslationListResponse {
+            returned: items.len(),
+            total,
+            truncated,
+            items,
+        };
+        Ok(render_json(&response))
+    }
+
+    #[tool(description = "List translation keys only, optionally filtered by a search query")]
+    async fn list_keys(
+        &self,
+        params: Parameters<ListKeysParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let query = params.query.as_deref();
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let limit = params
+            .limit
+            .map(|value| value as usize)
+            .unwrap_or(DEFAULT_LIST_LIMIT);
+        let limit = if limit == 0 { usize::MAX } else { limit };
+
+        let summaries = store.list_summaries(query).await;
+        let total = summaries.len();
+        let keys: Vec<String> = summaries.into_iter().take(limit).map(|s| s.key).collect();
+        let truncated = total > keys.len();
+        let response = serde_json::json!({
+            "keys": keys,
+            "total": total,
+            "returned": keys.len(),
+            "truncated": truncated
+        });
+        Ok(render_json(&response))
     }
 
     #[tool(description = "Fetch a single translation by key and language")]
@@ -418,8 +475,60 @@ impl XcStringsMcpServer {
     ) -> Result<CallToolResult, McpError> {
         let params = params.0;
         let store = self.store_for(Some(params.path.as_str())).await?;
+        store.reload().await.expect("reload store");
         let languages = store.list_languages().await;
         Ok(render_languages(languages))
+    }
+
+    #[tool(description = "Add a new language to the xcstrings file")]
+    async fn add_language(
+        &self,
+        params: Parameters<AddLanguageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
+            .add_language(&params.language)
+            .await
+            .map_err(Self::error_to_mcp)?;
+        Ok(render_ok_message(&format!(
+            "Language '{}' added successfully",
+            params.language
+        )))
+    }
+
+    #[tool(description = "Remove a language from the xcstrings file")]
+    async fn remove_language(
+        &self,
+        params: Parameters<RemoveLanguageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
+            .remove_language(&params.language)
+            .await
+            .map_err(Self::error_to_mcp)?;
+        Ok(render_ok_message(&format!(
+            "Language '{}' removed successfully",
+            params.language
+        )))
+    }
+
+    #[tool(description = "Update/rename a language in the xcstrings file")]
+    async fn update_language(
+        &self,
+        params: Parameters<UpdateLanguageParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        store
+            .update_language(&params.old_language, &params.new_language)
+            .await
+            .map_err(Self::error_to_mcp)?;
+        Ok(render_ok_message(&format!(
+            "Language '{}' renamed to '{}' successfully",
+            params.old_language, params.new_language
+        )))
     }
 }
 
@@ -511,7 +620,6 @@ mod tests {
                 path: path_str.clone(),
                 query: None,
                 limit: None,
-                include_values: None,
             }))
             .await
             .expect("tool success");
@@ -541,8 +649,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_translations_tool_can_include_values() {
-        let path = fresh_store_path("list_translations_full");
+    async fn list_keys_tool_returns_matching_keys() {
+        let path = fresh_store_path("list_keys_tool");
         let path_str = path.to_str().unwrap().to_string();
         let manager = Arc::new(
             XcStringsStoreManager::new(None)
@@ -553,6 +661,7 @@ mod tests {
             .store_for(Some(path_str.as_str()))
             .await
             .expect("load store");
+
         store
             .upsert_translation(
                 "greeting",
@@ -560,35 +669,59 @@ mod tests {
                 TranslationUpdate::from_value_state(Some("Hello".into()), None),
             )
             .await
-            .expect("save translation");
+            .expect("save greeting");
+
+        store
+            .upsert_translation(
+                "farewell",
+                "en",
+                TranslationUpdate::from_value_state(Some("Bye".into()), None),
+            )
+            .await
+            .expect("save farewell");
+
         let server = XcStringsMcpServer::new(manager.clone());
 
+        // Fetch all keys
         let result = server
-            .list_translations(Parameters(ListTranslationsParams {
+            .list_keys(Parameters(ListKeysParams {
                 path: path_str.clone(),
                 query: None,
                 limit: None,
-                include_values: Some(true),
             }))
             .await
             .expect("tool success");
 
         let payload = parse_json(&result);
-        let items = payload
-            .get("items")
+        let keys = payload
+            .get("keys")
             .and_then(|v| v.as_array())
-            .expect("array payload");
-        assert_eq!(items.len(), 1);
-        let translations = items[0]
-            .get("translations")
-            .and_then(|v| v.as_object())
-            .expect("translations map");
-        assert!(translations.contains_key("en"));
-        let greeting = translations
-            .get("en")
-            .and_then(|v| v.get("value"))
-            .and_then(|v| v.as_str());
-        assert_eq!(greeting, Some("Hello"));
+            .expect("keys array");
+        let key_values: Vec<&str> = keys
+            .iter()
+            .map(|v| v.as_str().expect("string key"))
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(key_values.contains(&"greeting"));
+        assert!(key_values.contains(&"farewell"));
+
+        // Query should filter down to a single key
+        let result = server
+            .list_keys(Parameters(ListKeysParams {
+                path: path_str.clone(),
+                query: Some("well".to_string()),
+                limit: None,
+            }))
+            .await
+            .expect("filtered success");
+        let payload = parse_json(&result);
+        let keys = payload
+            .get("keys")
+            .and_then(|v| v.as_array())
+            .expect("keys array");
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].as_str(), Some("farewell"));
+
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
@@ -762,6 +895,1227 @@ mod tests {
             }))
             .await
             .expect("tool success");
+        let records = store.list_records(None).await;
+        assert!(records[0].extraction_state.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn add_language_tool_creates_placeholder_localizations() {
+        let path = fresh_store_path("add_language_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add some initial translations
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Add French language via MCP tool
+        let result = server
+            .add_language(Parameters(AddLanguageParams {
+                path: path_str.clone(),
+                language: "fr".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert!(text.text.contains("Language 'fr' added successfully"));
+
+        store.reload().await.expect("reload store");
+        let languages = store.list_languages().await;
+        assert!(languages.contains(&"fr".to_string()));
+
+        // Placeholder should exist with needs-translation state
+        let placeholder = store
+            .get_translation("greeting", "fr")
+            .await
+            .expect("lookup succeeds")
+            .expect("placeholder created");
+        assert_eq!(placeholder.state.as_deref(), Some("needs-translation"));
+        assert!(placeholder.value.is_none());
+
+        // But we can add translations for this language
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        // Now the language still appears and has a translated value
+        let languages = store.list_languages().await;
+        assert!(languages.contains(&"fr".to_string()));
+
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        let greeting_fr = greeting_fr.expect("translation exists");
+        assert_eq!(greeting_fr.value.as_deref(), Some("Bonjour"));
+        assert_eq!(greeting_fr.state.as_deref(), Some("translated"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn add_language_tool_fails_if_exists() {
+        let path = fresh_store_path("add_language_tool_exists");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        // Try to add English (source language)
+        let result = server
+            .add_language(Parameters(AddLanguageParams {
+                path: path_str.clone(),
+                language: "en".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn remove_language_tool_deletes_localizations() {
+        let path = fresh_store_path("remove_language_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add translations in multiple languages
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        // Remove French via MCP tool
+        let result = server
+            .remove_language(Parameters(RemoveLanguageParams {
+                path: path_str.clone(),
+                language: "fr".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert!(text.text.contains("Language 'fr' removed successfully"));
+
+        // Explicitly reload the store to ensure we see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify French was removed
+        let languages = store.list_languages().await;
+        assert!(!languages.contains(&"fr".to_string()));
+
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        assert!(greeting_fr.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn remove_language_tool_fails_if_source_language() {
+        let path = fresh_store_path("remove_language_tool_source");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        // Try to remove English (source language)
+        let result = server
+            .remove_language(Parameters(RemoveLanguageParams {
+                path: path_str.clone(),
+                language: "en".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn update_language_tool_renames_successfully() {
+        let path = fresh_store_path("update_language_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add translations
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        // Rename French to French-France via MCP tool
+        let result = server
+            .update_language(Parameters(UpdateLanguageParams {
+                path: path_str.clone(),
+                old_language: "fr".to_string(),
+                new_language: "fr-FR".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert!(text
+            .text
+            .contains("Language 'fr' renamed to 'fr-FR' successfully"));
+
+        // Explicitly reload the store to ensure we see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the rename
+        let languages = store.list_languages().await;
+        assert!(!languages.contains(&"fr".to_string()));
+        assert!(languages.contains(&"fr-FR".to_string()));
+
+        let greeting_fr_fr = store.get_translation("greeting", "fr-FR").await.unwrap();
+        assert!(greeting_fr_fr.is_some());
+        assert_eq!(greeting_fr_fr.unwrap().value.as_deref(), Some("Bonjour"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn update_language_tool_fails_if_source_language() {
+        let path = fresh_store_path("update_language_tool_source");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        // Try to rename English (source language)
+        let result = server
+            .update_language(Parameters(UpdateLanguageParams {
+                path: path_str.clone(),
+                old_language: "en".to_string(),
+                new_language: "en-US".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_removes_existing_translation() {
+        let path = fresh_store_path("delete_translation_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add a translation
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        // Delete the English translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "greeting".to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let greeting_en = store.get_translation("greeting", "en").await.unwrap();
+        assert!(greeting_en.is_none());
+
+        // Verify the French translation still exists
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        assert!(greeting_fr.is_some());
+        assert_eq!(greeting_fr.unwrap().value.as_deref(), Some("Bonjour"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_fails_for_nonexistent_key() {
+        let path = fresh_store_path("delete_translation_tool_no_key");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        // Try to delete a translation for a key that doesn't exist
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "nonexistent_key".to_string(),
+                language: "en".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Translation 'nonexistent_key' (en) not found"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_fails_for_nonexistent_language() {
+        let path = fresh_store_path("delete_translation_tool_no_lang");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add a translation in English only
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Try to delete a translation for a language that doesn't exist for this key
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "greeting".to_string(),
+                language: "fr".to_string(),
+            }))
+            .await;
+
+        assert!(result.is_err());
+        let error = result.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("Translation 'greeting' (fr) not found"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_format_specifiers() {
+        let path = fresh_store_path("delete_translation_tool_format");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add a translation with format specifiers (like the one that caused the error)
+        let key_with_format = "paywall_badge_savings %lld";
+        store
+            .upsert_translation(
+                key_with_format,
+                "en",
+                TranslationUpdate::from_value_state(Some("Save %lld%".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Delete the translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: key_with_format.to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let translation = store.get_translation(key_with_format, "en").await.unwrap();
+        assert!(translation.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_special_characters() {
+        let path = fresh_store_path("delete_translation_tool_special");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Test various special characters that might cause issues
+        let special_keys = vec![
+            "key with spaces",
+            "key.with.dots",
+            "key-with-dashes",
+            "key_with_underscores",
+            "key/with/slashes",
+            "key@with@symbols",
+            "key#with#hash",
+            "key$with$dollar",
+            "key%with%percent",
+            "key^with^caret",
+            "key&with&ampersand",
+            "key*with*asterisk",
+            "key(with)parentheses",
+            "key[with]brackets",
+            "key{with}braces",
+            "key|with|pipes",
+            "key\\with\\backslashes",
+            "key\"with\"quotes",
+            "key'with'apostrophes",
+            "key`with`backticks",
+            "key~with~tildes",
+            "key!with!exclamation",
+            "key?with?question",
+            "key<with>angles",
+            "key=with=equals",
+            "key+with+plus",
+            "key,with,commas",
+            "key;with;semicolons",
+            "key:with:colons",
+        ];
+
+        for key in &special_keys {
+            // Add translation
+            store
+                .upsert_translation(
+                    key,
+                    "en",
+                    TranslationUpdate::from_value_state(Some(format!("Value for {}", key)), None),
+                )
+                .await
+                .expect("save translation");
+
+            // Delete translation via MCP tool
+            let result = server
+                .delete_translation(Parameters(DeleteTranslationParams {
+                    path: path_str.clone(),
+                    key: key.to_string(),
+                    language: "en".to_string(),
+                }))
+                .await
+                .expect("tool success");
+
+            // Verify success message
+            let content = result.content.as_ref().expect("content available");
+            let text = content
+                .first()
+                .expect("content entry")
+                .as_text()
+                .expect("text content");
+            assert_eq!(text.text, "Translation deleted");
+
+            // Reload the store to see the changes
+            store.reload().await.expect("reload store");
+
+            // Verify the translation was deleted
+            let translation = store.get_translation(key, "en").await.unwrap();
+            assert!(
+                translation.is_none(),
+                "Translation should be deleted for key: {}",
+                key
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_removes_key_when_last_translation() {
+        let path = fresh_store_path("delete_translation_tool_last");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add a translation with only one language
+        store
+            .upsert_translation(
+                "single_lang_key",
+                "en",
+                TranslationUpdate::from_value_state(Some("Only English".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Verify the key exists
+        let records_before = store.list_records(None).await;
+        assert_eq!(records_before.len(), 1);
+        assert_eq!(records_before[0].key, "single_lang_key");
+
+        // Delete the only translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "single_lang_key".to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the entire key was removed (since it has no translations left)
+        let records_after = store.list_records(None).await;
+        assert_eq!(records_after.len(), 0);
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_unicode_characters() {
+        let path = fresh_store_path("delete_translation_tool_unicode");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Test Unicode characters in keys and values
+        let unicode_key = "greeting_emoji_🌍_世界_مرحبا";
+        let unicode_value = "Hello World! 🌍 世界 مرحبا بالعالم";
+
+        store
+            .upsert_translation(
+                unicode_key,
+                "en",
+                TranslationUpdate::from_value_state(Some(unicode_value.into()), None),
+            )
+            .await
+            .expect("save unicode translation");
+
+        // Delete the translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: unicode_key.to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let translation = store.get_translation(unicode_key, "en").await.unwrap();
+        assert!(translation.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_empty_and_whitespace_keys() {
+        let path = fresh_store_path("delete_translation_tool_empty");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Test whitespace-only keys
+        let whitespace_keys = vec![
+            " ",        // single space
+            "  ",       // multiple spaces
+            "\t",       // tab
+            "\n",       // newline
+            "\r",       // carriage return
+            " \t\n\r ", // mixed whitespace
+        ];
+
+        for key in &whitespace_keys {
+            // Add translation
+            store
+                .upsert_translation(
+                    key,
+                    "en",
+                    TranslationUpdate::from_value_state(Some("Whitespace key".into()), None),
+                )
+                .await
+                .expect("save translation");
+
+            // Delete translation via MCP tool
+            let result = server
+                .delete_translation(Parameters(DeleteTranslationParams {
+                    path: path_str.clone(),
+                    key: key.to_string(),
+                    language: "en".to_string(),
+                }))
+                .await
+                .expect("tool success");
+
+            // Verify success message
+            let content = result.content.as_ref().expect("content available");
+            let text = content
+                .first()
+                .expect("content entry")
+                .as_text()
+                .expect("text content");
+            assert_eq!(text.text, "Translation deleted");
+
+            // Reload the store to see the changes
+            store.reload().await.expect("reload store");
+
+            // Verify the translation was deleted
+            let translation = store.get_translation(key, "en").await.unwrap();
+            assert!(
+                translation.is_none(),
+                "Translation should be deleted for whitespace key: {:?}",
+                key
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_variations() {
+        let path = fresh_store_path("delete_translation_tool_variations");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Create a translation with plural variations
+        let mut plural_cases = BTreeMap::new();
+        plural_cases.insert(
+            "one".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("One item".into())),
+                state: None,
+                variations: None,
+                substitutions: None,
+            },
+        );
+        plural_cases.insert(
+            "other".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("Many items".into())),
+                state: None,
+                variations: None,
+                substitutions: None,
+            },
+        );
+
+        let mut variations = BTreeMap::new();
+        variations.insert("plural".to_string(), plural_cases);
+
+        // Add translation with variations via MCP tool
+        server
+            .upsert_translation(Parameters(UpsertTranslationParams {
+                path: path_str.clone(),
+                key: "item_count".into(),
+                language: "en".into(),
+                value: None,
+                state: None,
+                variations: Some(variations),
+                substitutions: None,
+            }))
+            .await
+            .expect("upsert with variations");
+
+        // Verify the translation with variations exists
+        let translation = store.get_translation("item_count", "en").await.unwrap();
+        assert!(translation.is_some());
+        let translation = translation.unwrap();
+        assert!(translation.variations.contains_key("plural"));
+
+        // Delete the translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "item_count".to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let translation = store.get_translation("item_count", "en").await.unwrap();
+        assert!(translation.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_substitutions() {
+        let path = fresh_store_path("delete_translation_tool_substitutions");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Create a translation with substitutions
+        let mut substitutions = BTreeMap::new();
+        substitutions.insert(
+            "count".to_string(),
+            Some(SubstitutionUpdateParam {
+                value: Some(Some("%lld".into())),
+                state: None,
+                arg_num: Some(Some(1)),
+                format_specifier: Some(Some("lld".into())),
+                variations: None,
+            }),
+        );
+
+        // Add translation with substitutions via MCP tool
+        server
+            .upsert_translation(Parameters(UpsertTranslationParams {
+                path: path_str.clone(),
+                key: "download_progress".into(),
+                language: "en".into(),
+                value: Some(Some("Downloaded %lld files".into())),
+                state: None,
+                variations: None,
+                substitutions: Some(substitutions),
+            }))
+            .await
+            .expect("upsert with substitutions");
+
+        // Verify the translation with substitutions exists
+        let translation = store
+            .get_translation("download_progress", "en")
+            .await
+            .unwrap();
+        assert!(translation.is_some());
+        let translation = translation.unwrap();
+        assert!(translation.substitutions.contains_key("count"));
+
+        // Delete the translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "download_progress".to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let translation = store
+            .get_translation("download_progress", "en")
+            .await
+            .unwrap();
+        assert!(translation.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_translation_tool_handles_complex_variations_and_substitutions() {
+        let path = fresh_store_path("delete_translation_tool_complex");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Create complex nested variations with substitutions
+        let mut substitutions = BTreeMap::new();
+        substitutions.insert(
+            "count".to_string(),
+            Some(SubstitutionUpdateParam {
+                value: Some(Some("%lld".into())),
+                state: None,
+                arg_num: Some(Some(1)),
+                format_specifier: Some(Some("lld".into())),
+                variations: None,
+            }),
+        );
+
+        let mut plural_cases = BTreeMap::new();
+        plural_cases.insert(
+            "one".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("Downloaded %lld file".into())),
+                state: None,
+                variations: None,
+                substitutions: Some(substitutions.clone()),
+            },
+        );
+        plural_cases.insert(
+            "other".to_string(),
+            VariationUpdateParam {
+                value: Some(Some("Downloaded %lld files".into())),
+                state: None,
+                variations: None,
+                substitutions: Some(substitutions.clone()),
+            },
+        );
+
+        let mut variations = BTreeMap::new();
+        variations.insert("plural".to_string(), plural_cases);
+
+        // Add complex translation via MCP tool
+        server
+            .upsert_translation(Parameters(UpsertTranslationParams {
+                path: path_str.clone(),
+                key: "complex_download_status".into(),
+                language: "en".into(),
+                value: None,
+                state: None,
+                variations: Some(variations),
+                substitutions: Some(substitutions),
+            }))
+            .await
+            .expect("upsert complex translation");
+
+        // Verify the complex translation exists
+        let translation = store
+            .get_translation("complex_download_status", "en")
+            .await
+            .unwrap();
+        assert!(translation.is_some());
+        let translation = translation.unwrap();
+        assert!(translation.variations.contains_key("plural"));
+        assert!(translation.substitutions.contains_key("count"));
+
+        // Delete the translation via MCP tool
+        let result = server
+            .delete_translation(Parameters(DeleteTranslationParams {
+                path: path_str.clone(),
+                key: "complex_download_status".to_string(),
+                language: "en".to_string(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Translation deleted");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the translation was deleted
+        let translation = store
+            .get_translation("complex_download_status", "en")
+            .await
+            .unwrap();
+        assert!(translation.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_extraction_state_tool_creates_key_if_not_exists() {
+        let path = fresh_store_path("set_extraction_state_no_key");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Set extraction state for a key that doesn't exist yet
+        let result = server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: "new_key".to_string(),
+                extraction_state: Some("manual".to_string()),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Extraction state updated");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the key was created with extraction state
+        let records = store.list_records(None).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].key, "new_key");
+        assert_eq!(records[0].extraction_state.as_deref(), Some("manual"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_extraction_state_tool_handles_special_characters() {
+        let path = fresh_store_path("set_extraction_state_special");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Test key with format specifiers (like the one that might cause issues)
+        let key_with_format = "paywall_badge_savings %lld";
+        store
+            .upsert_translation(
+                key_with_format,
+                "en",
+                TranslationUpdate::from_value_state(Some("Save %lld%".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Set extraction state via MCP tool
+        let result = server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: key_with_format.to_string(),
+                extraction_state: Some("manual".to_string()),
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Extraction state updated");
+
+        // Reload the store to see the changes
+        store.reload().await.expect("reload store");
+
+        // Verify the extraction state was set
+        let records = store.list_records(None).await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].key, key_with_format);
+        assert_eq!(records[0].extraction_state.as_deref(), Some("manual"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_extraction_state_tool_clears_state() {
+        let path = fresh_store_path("set_extraction_state_clear");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add a translation
+        store
+            .upsert_translation(
+                "test_key",
+                "en",
+                TranslationUpdate::from_value_state(Some("Test value".into()), None),
+            )
+            .await
+            .expect("save translation");
+
+        // Set extraction state first
+        server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: "test_key".to_string(),
+                extraction_state: Some("manual".to_string()),
+            }))
+            .await
+            .expect("set extraction state");
+
+        // Reload and verify it was set
+        store.reload().await.expect("reload store");
+        let records = store.list_records(None).await;
+        assert_eq!(records[0].extraction_state.as_deref(), Some("manual"));
+
+        // Clear extraction state via MCP tool
+        let result = server
+            .set_extraction_state(Parameters(SetExtractionStateParams {
+                path: path_str.clone(),
+                key: "test_key".to_string(),
+                extraction_state: None,
+            }))
+            .await
+            .expect("tool success");
+
+        // Verify success message
+        let content = result.content.as_ref().expect("content available");
+        let text = content
+            .first()
+            .expect("content entry")
+            .as_text()
+            .expect("text content");
+        assert_eq!(text.text, "Extraction state updated");
+
+        // Reload and verify it was cleared
+        store.reload().await.expect("reload store");
         let records = store.list_records(None).await;
         assert!(records[0].extraction_state.is_none());
 

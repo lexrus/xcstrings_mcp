@@ -478,6 +478,11 @@ impl From<StoreError> for ApiError {
             StoreError::TranslationMissing { .. } => StatusCode::NOT_FOUND,
             StoreError::KeyMissing(_) => StatusCode::NOT_FOUND,
             StoreError::KeyExists(_) => StatusCode::CONFLICT,
+            StoreError::LanguageMissing(_) => StatusCode::NOT_FOUND,
+            StoreError::LanguageExists(_) => StatusCode::CONFLICT,
+            StoreError::InvalidLanguage(_) => StatusCode::BAD_REQUEST,
+            StoreError::CannotRemoveSourceLanguage(_) => StatusCode::BAD_REQUEST,
+            StoreError::CannotRenameSourceLanguage(_) => StatusCode::BAD_REQUEST,
             StoreError::SerdeFailed(_) | StoreError::ReadFailed(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }

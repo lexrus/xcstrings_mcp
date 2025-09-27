@@ -28,11 +28,22 @@ pub enum StoreError {
     KeyExists(String),
     #[error("xcstrings path is required when no default file has been configured")]
     PathRequired,
+    #[error("language '{0}' not found")]
+    LanguageMissing(String),
+    #[error("language '{0}' already exists")]
+    LanguageExists(String),
+    #[error("invalid language: {0}")]
+    InvalidLanguage(String),
+    #[error("cannot remove source language '{0}'")]
+    CannotRemoveSourceLanguage(String),
+    #[error("cannot rename source language '{0}'")]
+    CannotRenameSourceLanguage(String),
 }
 
 const DEFAULT_VERSION: &str = "1.0";
 const DEFAULT_SOURCE_LANGUAGE: &str = "en";
 const DEFAULT_TRANSLATION_STATE: &str = "translated";
+const NEEDS_TRANSLATION_STATE: &str = "needs-translation";
 
 fn default_version() -> String {
     DEFAULT_VERSION.to_string()
@@ -63,9 +74,18 @@ pub struct XcStringsFile {
 impl Default for XcStringsFile {
     fn default() -> Self {
         let mut raw = IndexMap::new();
-        raw.insert("version".to_string(), serde_json::Value::String(default_version()));
-        raw.insert("sourceLanguage".to_string(), serde_json::Value::String(default_source_language()));
-        raw.insert("strings".to_string(), serde_json::Value::Object(serde_json::Map::new()));
+        raw.insert(
+            "version".to_string(),
+            serde_json::Value::String(default_version()),
+        );
+        raw.insert(
+            "sourceLanguage".to_string(),
+            serde_json::Value::String(default_source_language()),
+        );
+        raw.insert(
+            "strings".to_string(),
+            serde_json::Value::Object(serde_json::Map::new()),
+        );
 
         Self {
             raw,
@@ -83,20 +103,24 @@ impl XcStringsFile {
         let raw: IndexMap<String, serde_json::Value> = serde_json::from_value(value.clone())?;
 
         // Extract fields
-        let version = raw.get("version")
+        let version = raw
+            .get("version")
             .and_then(|v| v.as_str())
             .unwrap_or("1.0")
             .to_string();
 
-        let format_version = raw.get("formatVersion")
+        let format_version = raw
+            .get("formatVersion")
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-        let source_language = raw.get("sourceLanguage")
+        let source_language = raw
+            .get("sourceLanguage")
             .and_then(|v| v.as_str())
             .unwrap_or("en")
             .to_string();
 
-        let strings = raw.get("strings")
+        let strings = raw
+            .get("strings")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
@@ -114,16 +138,28 @@ impl XcStringsFile {
         let mut raw = self.raw.clone();
 
         // Update the fields that may have changed
-        raw.insert("version".to_string(), serde_json::Value::String(self.version.clone()));
+        raw.insert(
+            "version".to_string(),
+            serde_json::Value::String(self.version.clone()),
+        );
 
         if let Some(ref fv) = self.format_version {
-            raw.insert("formatVersion".to_string(), serde_json::to_value(fv).unwrap());
+            raw.insert(
+                "formatVersion".to_string(),
+                serde_json::to_value(fv).unwrap(),
+            );
         } else {
             raw.shift_remove("formatVersion");
         }
 
-        raw.insert("sourceLanguage".to_string(), serde_json::Value::String(self.source_language.clone()));
-        raw.insert("strings".to_string(), serde_json::to_value(&self.strings).unwrap());
+        raw.insert(
+            "sourceLanguage".to_string(),
+            serde_json::Value::String(self.source_language.clone()),
+        );
+        raw.insert(
+            "strings".to_string(),
+            serde_json::to_value(&self.strings).unwrap(),
+        );
 
         serde_json::Value::Object(raw.into_iter().collect())
     }
@@ -187,11 +223,13 @@ pub struct XcStringUnit {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TranslationValue {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub substitutions: IndexMap<String, SubstitutionValue>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub variations: IndexMap<String, IndexMap<String, TranslationValue>>,
 }
 
@@ -207,7 +245,9 @@ pub struct TranslationUpdate {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SubstitutionValue {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
     #[serde(rename = "argNum", skip_serializing_if = "Option::is_none")]
     pub arg_num: Option<i64>,
@@ -422,9 +462,9 @@ fn sanitize_string_unit(unit: &mut XcStringUnit) {
 }
 
 fn string_unit_has_content(unit: &XcStringUnit) -> bool {
-    // Consider a unit as having content if it has both value and state
-    // Even empty string values are valid if they have a state
-    unit.value.is_some() && unit.state.is_some()
+    // Consider a unit as having content if it has either a value or an explicit state.
+    // This keeps placeholders that mark work-in-progress translations (e.g. needs-translation).
+    unit.value.is_some() || unit.state.is_some()
 }
 
 fn localization_is_empty(loc: &XcLocalization) -> bool {
@@ -542,6 +582,15 @@ fn normalize_localization_inner(loc: &mut XcLocalization, context: VariationCont
         .retain(|_, sub| !normalize_substitution(sub));
 
     localization_is_empty(loc)
+}
+
+fn placeholder_localization() -> XcLocalization {
+    let mut loc = XcLocalization::default();
+    loc.string_unit = Some(XcStringUnit {
+        state: Some(NEEDS_TRANSLATION_STATE.to_string()),
+        value: None,
+    });
+    loc
 }
 
 fn normalize_strings_file(doc: &mut XcStringsFile) {
@@ -1008,6 +1057,166 @@ impl XcStringsStore {
             langs.extend(entry.localizations.keys().cloned());
         }
         langs.into_iter().collect()
+    }
+
+    pub async fn add_language(&self, language: &str) -> Result<(), StoreError> {
+        let trimmed = language.trim();
+        if trimmed.is_empty() {
+            return Err(StoreError::InvalidLanguage(
+                "Language code cannot be empty".to_string(),
+            ));
+        }
+        let language = trimmed.to_string();
+
+        let mut doc = self.data.write().await;
+
+        // Check if language already exists
+        let mut existing_langs: BTreeSet<String> = BTreeSet::new();
+        existing_langs.insert(doc.source_language.clone());
+        for entry in doc.strings.values() {
+            existing_langs.extend(entry.localizations.keys().cloned());
+        }
+
+        if existing_langs.contains(&language) {
+            return Err(StoreError::LanguageExists(language));
+        }
+
+        // Add placeholder localizations for the new language so editors can immediately
+        // surface translation slots without clobbering existing values.
+        for entry in doc.strings.values_mut() {
+            entry
+                .localizations
+                .entry(language.clone())
+                .or_insert_with(placeholder_localization);
+        }
+
+        normalize_strings_file(&mut doc);
+        let json_value = doc.to_json_value();
+        let serialized = apple_json_formatter::to_apple_format(&json_value);
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
+    }
+
+    pub async fn remove_language(&self, language: &str) -> Result<(), StoreError> {
+        let trimmed = language.trim();
+        if trimmed.is_empty() {
+            return Err(StoreError::InvalidLanguage(
+                "Language code cannot be empty".to_string(),
+            ));
+        }
+        let language = trimmed.to_string();
+
+        let mut doc = self.data.write().await;
+
+        // Cannot remove the source language
+        if language == doc.source_language {
+            return Err(StoreError::CannotRemoveSourceLanguage(language));
+        }
+
+        // Check if language exists
+        let mut language_exists = false;
+        for entry in doc.strings.values() {
+            if entry.localizations.contains_key(language.as_str()) {
+                language_exists = true;
+                break;
+            }
+        }
+
+        if !language_exists {
+            return Err(StoreError::LanguageMissing(language.clone()));
+        }
+
+        // Remove the language from all string entries
+        for entry in doc.strings.values_mut() {
+            entry.localizations.shift_remove(language.as_str());
+        }
+
+        // Remove any string entries that have no localizations left
+        doc.strings
+            .retain(|_, entry| !entry.localizations.is_empty());
+
+        normalize_strings_file(&mut doc);
+        let json_value = doc.to_json_value();
+        let serialized = apple_json_formatter::to_apple_format(&json_value);
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
+    }
+
+    pub async fn update_language(
+        &self,
+        old_language: &str,
+        new_language: &str,
+    ) -> Result<(), StoreError> {
+        let old_trimmed = old_language.trim();
+        if old_trimmed.is_empty() {
+            return Err(StoreError::InvalidLanguage(
+                "Language code cannot be empty".to_string(),
+            ));
+        }
+        let new_trimmed = new_language.trim();
+        if new_trimmed.is_empty() {
+            return Err(StoreError::InvalidLanguage(
+                "Language code cannot be empty".to_string(),
+            ));
+        }
+
+        if old_trimmed == new_trimmed {
+            return Ok(()); // No change needed
+        }
+
+        let old_language = old_trimmed.to_string();
+        let new_language = new_trimmed.to_string();
+
+        let mut doc = self.data.write().await;
+
+        // Cannot rename the source language
+        if old_language == doc.source_language {
+            return Err(StoreError::CannotRenameSourceLanguage(old_language));
+        }
+
+        // Check if old language exists
+        let mut old_language_exists = false;
+        for entry in doc.strings.values() {
+            if entry.localizations.contains_key(old_language.as_str()) {
+                old_language_exists = true;
+                break;
+            }
+        }
+
+        if !old_language_exists {
+            return Err(StoreError::LanguageMissing(old_language));
+        }
+
+        // Check if new language already exists
+        let mut new_language_exists = false;
+        for entry in doc.strings.values() {
+            if entry.localizations.contains_key(new_language.as_str()) {
+                new_language_exists = true;
+                break;
+            }
+        }
+
+        if new_language_exists {
+            return Err(StoreError::LanguageExists(new_language.clone()));
+        }
+
+        // Rename the language in all string entries
+        for entry in doc.strings.values_mut() {
+            if let Some(localization) = entry.localizations.shift_remove(old_language.as_str()) {
+                entry
+                    .localizations
+                    .insert(new_language.clone(), localization);
+            }
+        }
+
+        normalize_strings_file(&mut doc);
+        let json_value = doc.to_json_value();
+        let serialized = apple_json_formatter::to_apple_format(&json_value);
+        drop(doc);
+        fs::write(&self.path, serialized).await?;
+        Ok(())
     }
 
     pub async fn list_records(&self, filter: Option<&str>) -> Vec<TranslationRecord> {
@@ -2472,5 +2681,317 @@ mod tests {
             plural_vars.contains_key("other"),
             "Other case should remain"
         );
+    }
+
+    #[tokio::test]
+    async fn add_language_succeeds_and_ready_for_translations() {
+        let tmp = TempStorePath::new("add_language");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add some initial translations
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Add a new language (creates placeholder entries immediately)
+        store.add_language("fr").await.unwrap();
+
+        let languages = store.list_languages().await;
+        assert!(languages.contains(&"fr".to_string()));
+
+        // Placeholder should exist with needs-translation state and no value yet
+        let placeholder = store
+            .get_translation("greeting", "fr")
+            .await
+            .expect("lookup succeeds")
+            .expect("placeholder created");
+        assert_eq!(placeholder.state.as_deref(), Some(NEEDS_TRANSLATION_STATE));
+        assert!(placeholder.value.is_none());
+
+        // Update translation for this language
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Now the language still appears and has the translated value
+        let languages = store.list_languages().await;
+        assert!(languages.contains(&"fr".to_string()));
+
+        let greeting = store
+            .get_translation("greeting", "fr")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(greeting.value.as_deref(), Some("Bonjour"));
+        assert_eq!(greeting.state.as_deref(), Some(DEFAULT_TRANSLATION_STATE));
+    }
+
+    #[tokio::test]
+    async fn add_language_to_empty_file_succeeds_but_not_visible() {
+        let tmp = TempStorePath::new("add_language_empty");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add a language to an empty file
+        store.add_language("fr").await.unwrap();
+
+        // With no strings present, there's nothing to attach placeholders to yet
+        let languages = store.list_languages().await;
+        assert!(!languages.contains(&"fr".to_string()));
+        assert!(languages.contains(&"en".to_string())); // Source language is always present
+
+        // But if we add a translation, the language will appear
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        let languages = store.list_languages().await;
+        assert!(languages.contains(&"fr".to_string()));
+    }
+
+    #[tokio::test]
+    async fn add_language_fails_if_already_exists() {
+        let tmp = TempStorePath::new("add_language_exists");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add some initial translations
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Try to add English again (source language)
+        let result = store.add_language("en").await;
+        assert!(matches!(result, Err(StoreError::LanguageExists(_))));
+
+        // Add French translation (not just add language)
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Try to add French again (now it exists because it has translations)
+        let result = store.add_language("fr").await;
+        assert!(matches!(result, Err(StoreError::LanguageExists(_))));
+    }
+
+    #[tokio::test]
+    async fn add_language_fails_if_empty() {
+        let tmp = TempStorePath::new("add_language_empty");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let result = store.add_language("").await;
+        assert!(matches!(result, Err(StoreError::InvalidLanguage(_))));
+
+        let result = store.add_language("   ").await;
+        assert!(matches!(result, Err(StoreError::InvalidLanguage(_))));
+    }
+
+    #[tokio::test]
+    async fn remove_language_deletes_localizations() {
+        let tmp = TempStorePath::new("remove_language");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translations in multiple languages
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "greeting",
+                "es",
+                TranslationUpdate::from_value_state(Some("Hola".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Remove French
+        store.remove_language("fr").await.unwrap();
+
+        // Verify French was removed
+        let languages = store.list_languages().await;
+        assert!(!languages.contains(&"fr".to_string()));
+        assert!(languages.contains(&"en".to_string()));
+        assert!(languages.contains(&"es".to_string()));
+
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        assert!(greeting_fr.is_none());
+
+        let greeting_en = store.get_translation("greeting", "en").await.unwrap();
+        assert!(greeting_en.is_some());
+        assert_eq!(greeting_en.unwrap().value.as_deref(), Some("Hello"));
+    }
+
+    #[tokio::test]
+    async fn remove_language_fails_if_source_language() {
+        let tmp = TempStorePath::new("remove_source_language");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let result = store.remove_language("en").await;
+        assert!(matches!(
+            result,
+            Err(StoreError::CannotRemoveSourceLanguage(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn remove_language_fails_if_not_exists() {
+        let tmp = TempStorePath::new("remove_language_missing");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let result = store.remove_language("fr").await;
+        assert!(matches!(result, Err(StoreError::LanguageMissing(_))));
+    }
+
+    #[tokio::test]
+    async fn update_language_renames_successfully() {
+        let tmp = TempStorePath::new("update_language");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translations
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Rename French to French-France
+        store.update_language("fr", "fr-FR").await.unwrap();
+
+        // Verify the rename
+        let languages = store.list_languages().await;
+        assert!(!languages.contains(&"fr".to_string()));
+        assert!(languages.contains(&"fr-FR".to_string()));
+
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        assert!(greeting_fr.is_none());
+
+        let greeting_fr_fr = store.get_translation("greeting", "fr-FR").await.unwrap();
+        assert!(greeting_fr_fr.is_some());
+        assert_eq!(greeting_fr_fr.unwrap().value.as_deref(), Some("Bonjour"));
+    }
+
+    #[tokio::test]
+    async fn update_language_fails_if_source_language() {
+        let tmp = TempStorePath::new("update_source_language");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let result = store.update_language("en", "en-US").await;
+        assert!(matches!(
+            result,
+            Err(StoreError::CannotRenameSourceLanguage(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_language_fails_if_old_not_exists() {
+        let tmp = TempStorePath::new("update_language_missing");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let result = store.update_language("fr", "fr-FR").await;
+        assert!(matches!(result, Err(StoreError::LanguageMissing(_))));
+    }
+
+    #[tokio::test]
+    async fn update_language_fails_if_new_exists() {
+        let tmp = TempStorePath::new("update_language_exists");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translations
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "greeting",
+                "es",
+                TranslationUpdate::from_value_state(Some("Hola".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Try to rename French to Spanish (which already exists)
+        let result = store.update_language("fr", "es").await;
+        assert!(matches!(result, Err(StoreError::LanguageExists(_))));
+    }
+
+    #[tokio::test]
+    async fn update_language_no_op_if_same_name() {
+        let tmp = TempStorePath::new("update_language_same");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translation
+        store
+            .upsert_translation(
+                "greeting",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // "Rename" to the same name
+        let result = store.update_language("fr", "fr").await;
+        assert!(result.is_ok());
+
+        // Verify nothing changed
+        let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
+        assert!(greeting_fr.is_some());
+        assert_eq!(greeting_fr.unwrap().value.as_deref(), Some("Bonjour"));
     }
 }

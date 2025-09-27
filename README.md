@@ -17,12 +17,17 @@ This MCP server provides the following functions for managing Xcode `Localizable
 
 ### Core Translation Functions
 
-- **`list_translations(path, query?, limit?, include_values?)`** - List translation entries with optional filtering
+- **`list_translations(path, query?, limit?)`** - List translation entries with optional filtering
   - `path`: Path to the `.xcstrings` file
   - `query`: Optional case-insensitive search query to filter results
   - `limit`: Maximum number of items to return (defaults to 100, set to 0 for no limit)
-  - `include_values`: Include full translation payloads (defaults to false for compact summaries)
-  - Returns: JSON array of translation summaries or full records
+  - Returns: JSON array of translation summaries including key metadata
+
+- **`list_keys(path, query?, limit?)`** - List translation keys without loading full records
+  - `path`: Path to the `.xcstrings` file
+  - `query`: Optional case-insensitive search query to filter results
+  - `limit`: Maximum number of items to return (defaults to 100, set to 0 for no limit)
+  - Returns: JSON payload containing `keys`, `total`, `returned`, and `truncated` flags
 
 - **`get_translation(path, key, language)`** - Fetch a single translation by key and language
   - `path`: Path to the `.xcstrings` file
@@ -70,6 +75,25 @@ This MCP server provides the following functions for managing Xcode `Localizable
 - **`list_languages(path)`** - List all languages present in the xcstrings file
   - `path`: Path to the `.xcstrings` file
   - Returns: JSON array of language codes found in the catalog
+
+- **`add_language(path, language)`** - Add a new language to the xcstrings file
+  - `path`: Path to the `.xcstrings` file
+  - `language`: Language code to add (e.g., "fr", "es", "de")
+  - Returns: Success confirmation
+  - Note: Creates placeholder entries in existing keys with `needs-translation` state so the language is immediately discoverable
+
+- **`remove_language(path, language)`** - Remove a language from the xcstrings file
+  - `path`: Path to the `.xcstrings` file
+  - `language`: Language code to remove
+  - Returns: Success confirmation
+  - Note: Cannot remove the source language (typically "en")
+
+- **`update_language(path, oldLanguage, newLanguage)`** - Rename/update a language code in the xcstrings file
+  - `path`: Path to the `.xcstrings` file
+  - `oldLanguage`: Current language code to rename
+  - `newLanguage`: New language code
+  - Returns: Success confirmation
+  - Note: Cannot rename the source language; preserves all existing translations
 
 ### Additional Features
 
@@ -126,7 +150,8 @@ The web interface becomes available at `http://<host>:<port>/`.
 
 Run the binary with stdio transport (default) and wire it into an MCP-enabled client. The following tools are exposed (each expects a `path` argument pointing to the target `.xcstrings` file):
 
-- `list_translations(path, query?, limit?, include_values?)`
+- `list_translations(path, query?, limit?)`
+- `list_keys(path, query?, limit?)`
 - `get_translation(path, key, language)`
 - `upsert_translation(path, key, language, value?, state?, variations?)`
 - `delete_translation(path, key, language)`
@@ -134,10 +159,13 @@ Run the binary with stdio transport (default) and wire it into an MCP-enabled cl
 - `set_comment(path, key, comment?)`
 - `set_extraction_state(path, key, extractionState?)`
 - `list_languages(path)`
+- `add_language(path, language)`
+- `remove_language(path, language)`
+- `update_language(path, oldLanguage, newLanguage)`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
 
-`list_translations` now returns compact summaries (`key`, `comment`, `extractionState`, `languages`, and `hasVariations`) so responses stay lightweight even for large catalogs. Use `limit` (defaults to 100, set to `0` for no limit) to page through results, and pass `include_values: true` when you intentionally want the full translation payload inline. Pair it with `get_translation` for per-language details without flooding the client context.
+`list_translations` now returns compact summaries (`key`, `comment`, `extractionState`, `languages`, and `hasVariations`) so responses stay lightweight even for large catalogs. Use `limit` (defaults to 100, set to `0` for no limit) to page through results and pair it with `get_translation` for per-language details without flooding the client context.
 
 When calling `upsert_translation`, you can send:
 

@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         let manager = stores.clone();
         tokio::spawn(async move {
             if let Err(err) = web::serve(addr, manager).await {
-                error!(?err, "Web server stopped");
+                warn!(?err, "Web server failed to start or stopped (MCP server continues to work)");
             }
         })
     };
@@ -72,9 +72,6 @@ async fn main() -> anyhow::Result<()> {
     tokio::select! {
         _ = signal::ctrl_c() => {
             warn!("Received Ctrl+C — shutting down");
-        }
-        _ = web_handle => {
-            warn!("Web server task exited");
         }
         _ = mcp_handle => {
             warn!("MCP task exited");

@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Stars](https://img.shields.io/github/stars/lexrus/xcstrings_mcp.svg)](https://github.com/lexrus/xcstrings_mcp/stargazers)
 
-A Rust implementation of a __Model Context Protocol (MCP) server__ designed for working with Xcode `.xcstrings` files. It exposes the translation catalog as MCP tools and also serves a __lightweight web editor__ so teams can browse, search, and edit strings from a browser.
+A Rust implementation of a **Model Context Protocol (MCP) server** designed for working with Xcode `.xcstrings` files. It exposes the translation catalog as MCP tools and also serves a **lightweight web editor** so teams can browse, search, and edit strings from a browser.
 
 > **Note**: This project was created with AI assistance using tools like Codex and Claude Code. While we strive for quality, there may be issues or areas for improvement. We welcome bug reports, feature requests, and contributions via [GitHub Issues](https://github.com/lexrus/xcstrings_mcp/issues).
 
@@ -184,11 +184,7 @@ If the server starts without a default path (no CLI argument and no `STRINGS_PAT
 
 ### Integrating with AI tools
 
-Modern MCP-aware AI clients let you register external servers through a JSON manifest. As an example, the following snippet adds `xcstrings-mcp` to Claude Code:
-
-`claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio","env":{"WEB_HOST": "127.0.0.1","WEB_PORT": "8787"}}'`
-
-You can also add it manually to `~/.claude.json`:
+Modern MCP-aware AI clients let you register external servers through a JSON manifest.
 
 ```json
 {
@@ -227,8 +223,21 @@ To run with a default localization file (enabling the embedded web UI and lettin
 
 You can supply the path via `STRINGS_PATH` instead of CLI arguments if you prefer. In either case, tool calls may omit `path` and the web UI will mount the default file.
 
-> **Note**
-> Legacy environment variables with the `XCSTRINGS_` prefix are still accepted for backward compatibility, but prefer the shorter names above going forward.
+#### Claude Code
+
+`claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio","env":{"WEB_HOST": "127.0.0.1","WEB_PORT": "8787"}}'`
+You can also add the JSON manually to `~/.claude.json`.
+
+#### Codex
+
+Add this to your `~/.codex/config.toml`:
+
+```ini
+[mcp_servers.xcstrings_mcp]
+command = "/Users/you/.cargo/bin/xcstrings_mcp"
+args = ["--"]
+env = { WEB_HOST = "127.0.0.1", WEB_PORT = "7788" }
+```
 
 ## Development
 

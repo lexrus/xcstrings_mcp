@@ -10,9 +10,9 @@
 ## Key Components
 
 - `src/main.rs` wires CLI/env config (`STRINGS_PATH`, `WEB_HOST`, `WEB_PORT`), spawns MCP + web services, and handles shutdown.
-- `src/mcp_server.rs` implements tools: `list_translations`, `get_translation`, `upsert_translation`, `delete_translation`, `delete_key`, `set_comment`, `set_extraction_state`, `list_languages`.
-- `src/store.rs` manages async file access, caching with persistence on every change, variation/substitution updates, and catalog discovery.
-- `src/web/` hosts the embedded UI (`index.html`) with search, inline edits, plural management, and runtime catalog switching.
+- `src/mcp_server.rs` implements tools: `list_translations`, `get_translation`, `upsert_translation`, `delete_translation`, `delete_key`, `set_comment`, `set_extraction_state`, `list_languages`, `add_language`, `remove_language`, `update_language`, `list_untranslated`.
+- `src/store.rs` manages async file access, caching with persistence on every change, variation/substitution updates, catalog discovery, translation progress tracking, and untranslated key detection.
+- `src/web/` hosts the embedded UI (`index.html`) with search, inline edits, plural management, translation progress display, and runtime catalog switching.
 - `examples/` contains sample catalogs for manual or automated validation; keep in sync with schema expectations.
 
 ## Dev Workflow
@@ -32,8 +32,9 @@
 ## Testing Expectations
 
 - Place Rust tests alongside code (see `store.rs` for patterns) with descriptive snake_case names.
-- Cover storage and MCP edge cases (plural variations, substitutions, comment handling, discovery) when modifying related code.
+- Cover storage and MCP edge cases (plural variations, substitutions, comment handling, discovery, language management, translation progress) when modifying related code.
 - Manually exercise the web UI via `cargo run` for UX-impacting changes; add backend tests to reflect new UI interactions.
+- Test translation percentage calculations with various scenarios (empty values, should_translate flags, missing localizations).
 
 ## Outstanding Focus Areas
 

@@ -62,6 +62,7 @@ Async storage layer for `.xcstrings` files. Handles:
 - Persistence on every change
 - Translation CRUD operations with plural variations support
 - Multi-file store management (dynamic path mode vs default path)
+- Translation progress tracking (percentage calculation, untranslated keys detection)
 
 ### `src/mcp_server.rs`
 
@@ -73,6 +74,10 @@ MCP tool definitions exposing translation functionality:
 - `delete_translation`/`delete_key` - Remove operations
 - `set_comment` - Manage translation comments
 - `list_languages` - Enumerate discovered languages
+- `add_language` - Add new language with placeholder entries
+- `remove_language` - Remove language from catalog
+- `update_language` - Rename/update language code
+- `list_untranslated` - List untranslated keys per language
 
 ### `src/web/mod.rs`
 
@@ -81,6 +86,7 @@ Axum-based web UI with single-page application for:
 - Browsing translations with search/filtering
 - Editing values and plural variations
 - Managing comments
+- Translation progress display with percentages in language dropdown
 - Only enabled when default xcstrings path is configured
 
 ### `src/main.rs`

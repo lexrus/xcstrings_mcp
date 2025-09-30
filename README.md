@@ -95,10 +95,16 @@ This MCP server provides the following functions for managing Xcode `Localizable
   - Returns: Success confirmation
   - Note: Cannot rename the source language; preserves all existing translations
 
+- **`list_untranslated(path)`** - List untranslated keys per language
+  - `path`: Path to the `.xcstrings` file
+  - Returns: JSON map of language codes to arrays of untranslated keys
+  - Note: A translation is considered untranslated if the value is empty/None or no localization exists
+
 ### Additional Features
 
 - **Async-safe store** that loads and persists `Localizable.xcstrings` JSON on every change
 - **Embedded Axum web UI** for browsing translations, filtering by query, editing values, plural/device variations, and managing comments
+- **Translation progress tracking** with percentage display in the language dropdown (excludes keys marked as should_translate=false)
 - **Automatic discovery** of `.xcstrings` files when no default path is provided, with a selector in the web UI for runtime catalog switching
 - **Device-specific variations** support (iPhone, iPad, Mac, Apple Watch, etc.) with mutual exclusivity logic between plural and device variations
 - **Inline editing** for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases)
@@ -162,6 +168,7 @@ Run the binary with stdio transport (default) and wire it into an MCP-enabled cl
 - `add_language(path, language)`
 - `remove_language(path, language)`
 - `update_language(path, oldLanguage, newLanguage)`
+- `list_untranslated(path)`
 
 Each tool returns JSON payloads encoded into text content for easier consumption.
 

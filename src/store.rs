@@ -593,6 +593,12 @@ fn placeholder_localization() -> XcLocalization {
     loc
 }
 
+/// Extracts the main translation value from a localization.
+/// Returns None if there's no string unit or no value.
+fn extract_translation_value(loc: &XcLocalization) -> Option<String> {
+    loc.string_unit.as_ref()?.value.clone()
+}
+
 fn normalize_strings_file(doc: &mut XcStringsFile) {
     if doc.version.trim().is_empty() {
         doc.version = default_version();
@@ -1057,6 +1063,104 @@ impl XcStringsStore {
             langs.extend(entry.localizations.keys().cloned());
         }
         langs.into_iter().collect()
+    }
+
+    /// Returns a map of languages to their untranslated keys.
+    /// A translation is considered untranslated if:
+    /// - The value is empty/None
+    /// - No localization exists for that language
+    pub async fn list_untranslated(&self) -> HashMap<String, Vec<String>> {
+        let doc = self.data.read().await;
+        let mut result: HashMap<String, Vec<String>> = HashMap::new();
+
+        // Get all languages
+        let mut langs: BTreeSet<String> = BTreeSet::new();
+        langs.insert(doc.source_language.clone());
+        for entry in doc.strings.values() {
+            langs.extend(entry.localizations.keys().cloned());
+        }
+
+        // For each key, check which languages have untranslated values
+        for (key, entry) in doc.strings.iter() {
+            // Check each language for untranslated status
+            for lang in langs.iter() {
+                let is_untranslated = if let Some(localization) = entry.localizations.get(lang) {
+                    match extract_translation_value(localization) {
+                        None => true,                            // No value
+                        Some(value) if value.is_empty() => true, // Empty value
+                        Some(_) => false, // Has a value (even if same as other languages)
+                    }
+                } else {
+                    true // No localization for this language
+                };
+
+                if is_untranslated {
+                    result
+                        .entry(lang.clone())
+                        .or_insert_with(Vec::new)
+                        .push(key.clone());
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Returns a map of languages to their translation percentage (0-100)
+    /// Keys marked as should_translate=false are excluded from the calculation
+    /// A translation is considered complete if it has a non-empty value
+    pub async fn get_translation_percentages(&self) -> HashMap<String, f64> {
+        let doc = self.data.read().await;
+        let mut result: HashMap<String, f64> = HashMap::new();
+
+        // Get all languages
+        let mut langs: BTreeSet<String> = BTreeSet::new();
+        langs.insert(doc.source_language.clone());
+        for entry in doc.strings.values() {
+            langs.extend(entry.localizations.keys().cloned());
+        }
+
+        // Count only keys that should be translated
+        let translatable_keys: Vec<&String> = doc
+            .strings
+            .iter()
+            .filter(|(_, entry)| entry.should_translate.unwrap_or(true))
+            .map(|(key, _)| key)
+            .collect();
+
+        if translatable_keys.is_empty() {
+            return result;
+        }
+
+        let total_keys = translatable_keys.len() as f64;
+
+        for lang in langs.iter() {
+            let mut translated_count = 0;
+
+            for key in translatable_keys.iter() {
+                let entry = &doc.strings[*key];
+
+                // Check if this language has a valid translation (non-empty value)
+                let is_translated = if let Some(localization) = entry.localizations.get(lang) {
+                    match extract_translation_value(localization) {
+                        None => false,
+                        Some(value) if value.is_empty() => false,
+                        Some(_) => true, // Has a non-empty value
+                    }
+                } else {
+                    false
+                };
+
+                if is_translated {
+                    translated_count += 1;
+                }
+            }
+
+            let percentage = (translated_count as f64 / total_keys) * 100.0;
+            result.insert(lang.clone(), percentage);
+        }
+
+        result
     }
 
     pub async fn add_language(&self, language: &str) -> Result<(), StoreError> {
@@ -2993,5 +3097,454 @@ mod tests {
         let greeting_fr = store.get_translation("greeting", "fr").await.unwrap();
         assert!(greeting_fr.is_some());
         assert_eq!(greeting_fr.unwrap().value.as_deref(), Some("Bonjour"));
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_with_empty_values() {
+        let tmp = TempStorePath::new("list_untranslated_empty");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translations - some with missing/no value
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // key1 has no French translation at all
+
+        let untranslated = store.list_untranslated().await;
+
+        // French should have key1 as untranslated (missing)
+        let fr_untranslated = untranslated.get("fr");
+        assert!(fr_untranslated.is_some());
+        let fr_keys = fr_untranslated.unwrap();
+        assert_eq!(fr_keys.len(), 1);
+        assert!(fr_keys.contains(&"key1".to_string()));
+
+        // English should have no untranslated keys
+        let en_untranslated = untranslated.get("en");
+        if let Some(keys) = en_untranslated {
+            assert!(keys.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_with_duplicate_values() {
+        let tmp = TempStorePath::new("list_untranslated_duplicates");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add translations where French has the same value as English
+        // This is now considered translated (duplicates are allowed)
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None), // Same as English - now OK
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None), // Properly translated
+            )
+            .await
+            .unwrap();
+
+        let untranslated = store.list_untranslated().await;
+
+        // Both languages should have no untranslated keys (duplicates are now allowed)
+        let fr_untranslated = untranslated.get("fr");
+        if let Some(keys) = fr_untranslated {
+            assert!(keys.is_empty());
+        }
+
+        let en_untranslated = untranslated.get("en");
+        if let Some(keys) = en_untranslated {
+            assert!(keys.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_with_no_translations() {
+        let tmp = TempStorePath::new("list_untranslated_none");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Empty store
+        let untranslated = store.list_untranslated().await;
+
+        // Should only have source language with no untranslated keys
+        assert!(untranslated.is_empty() || untranslated.get("en").unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_with_all_translated() {
+        let tmp = TempStorePath::new("list_untranslated_all_done");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add fully translated keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None),
+            )
+            .await
+            .unwrap();
+
+        let untranslated = store.list_untranslated().await;
+
+        // All languages should have no untranslated keys
+        for (_, keys) in untranslated.iter() {
+            assert!(keys.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn get_translation_percentages_empty_store() {
+        let tmp = TempStorePath::new("percentages_empty");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        let percentages = store.get_translation_percentages().await;
+
+        // Empty store should return empty map
+        assert!(percentages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_translation_percentages_partial_translation() {
+        let tmp = TempStorePath::new("percentages_partial");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add 4 keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key3",
+                "en",
+                TranslationUpdate::from_value_state(Some("Foo".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key4",
+                "en",
+                TranslationUpdate::from_value_state(Some("Bar".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // French: 3 translated (including duplicate), 1 missing (key3 will be filtered as empty)
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // key3: no French translation (empty will be filtered out by normalization)
+
+        store
+            .upsert_translation(
+                "key4",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bar".into()), None), // Duplicate - now OK
+            )
+            .await
+            .unwrap();
+
+        let percentages = store.get_translation_percentages().await;
+
+        // English should be 100% (all 4 keys have values)
+        let en_percentage = percentages.get("en").unwrap();
+        assert_eq!(*en_percentage, 100.0);
+
+        // French should be 75% (3 out of 4, key3 is missing)
+        let fr_percentage = percentages.get("fr").unwrap();
+        assert_eq!(*fr_percentage, 75.0);
+    }
+
+    #[tokio::test]
+    async fn get_translation_percentages_fully_translated() {
+        let tmp = TempStorePath::new("percentages_full");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add fully translated keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None),
+            )
+            .await
+            .unwrap();
+
+        let percentages = store.get_translation_percentages().await;
+
+        // Both languages should be 100%
+        let en_percentage = percentages.get("en").unwrap();
+        assert_eq!(*en_percentage, 100.0);
+
+        let fr_percentage = percentages.get("fr").unwrap();
+        assert_eq!(*fr_percentage, 100.0);
+    }
+
+    #[tokio::test]
+    async fn get_translation_percentages_multiple_languages() {
+        let tmp = TempStorePath::new("percentages_multi");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add 2 keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // French: 1 translated, 1 missing
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // German: 2 translated
+        store
+            .upsert_translation(
+                "key1",
+                "de",
+                TranslationUpdate::from_value_state(Some("Hallo".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "de",
+                TranslationUpdate::from_value_state(Some("Welt".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Spanish: 0 translated (both missing)
+
+        let percentages = store.get_translation_percentages().await;
+
+        // English: 100% (2/2)
+        let en_percentage = percentages.get("en").unwrap();
+        assert_eq!(*en_percentage, 100.0);
+
+        // French: 50% (1/2)
+        let fr_percentage = percentages.get("fr").unwrap();
+        assert_eq!(*fr_percentage, 50.0);
+
+        // German: 100% (2/2)
+        let de_percentage = percentages.get("de").unwrap();
+        assert_eq!(*de_percentage, 100.0);
+    }
+
+    #[tokio::test]
+    async fn get_translation_percentages_excludes_should_not_translate() {
+        let tmp = TempStorePath::new("percentages_should_translate");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        // Add 3 keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store
+            .upsert_translation(
+                "key3",
+                "en",
+                TranslationUpdate::from_value_state(Some("NoTranslate".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // Mark key3 as should_translate=false
+        store
+            .set_should_translate("key3", Some(false))
+            .await
+            .unwrap();
+
+        // French: only translate key1
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .unwrap();
+
+        // key2 is missing French, key3 should not be counted
+
+        let percentages = store.get_translation_percentages().await;
+
+        // English: 100% (2/2 translatable keys)
+        let en_percentage = percentages.get("en").unwrap();
+        assert_eq!(*en_percentage, 100.0);
+
+        // French: 50% (1/2 translatable keys)
+        // key3 is excluded from the calculation
+        let fr_percentage = percentages.get("fr").unwrap();
+        assert_eq!(*fr_percentage, 50.0);
     }
 }

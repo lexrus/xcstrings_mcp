@@ -998,6 +998,7 @@
         files: [],
         currentPath: null,
         languages: [],
+        translationPercentages: {},
         currentLanguage: null,
         referenceLanguage: null,
         items: [],
@@ -1085,11 +1086,15 @@
         return code;
       }
 
-      function formatLanguageDisplay(code) {
+      function formatLanguageDisplay(code, showPercentage = false) {
         if (!code) {
           return "";
         }
-        return `${languageLabel(code)}(${code})`;
+        const percentage = state.translationPercentages[code];
+        if (showPercentage && percentage !== undefined) {
+          return `${languageLabel(code)} (${code}) - ${percentage.toFixed(0)}%`;
+        }
+        return `${languageLabel(code)} (${code})`;
       }
 
       function translationStateLabel(value) {
@@ -1356,12 +1361,12 @@
         state.languages.forEach((lang) => {
           const option = document.createElement("option");
           option.value = lang;
-          option.textContent = formatLanguageDisplay(lang);
+          option.textContent = formatLanguageDisplay(lang, true); // Show percentage
           languageSelect.appendChild(option);
 
           const refOption = document.createElement("option");
           refOption.value = lang;
-          refOption.textContent = formatLanguageDisplay(lang);
+          refOption.textContent = formatLanguageDisplay(lang, false); // No percentage
           referenceSelect.appendChild(refOption);
         });
 
@@ -1461,11 +1466,13 @@
       async function fetchLanguages() {
         if (!state.currentPath && !SAMPLE_MODE) {
           state.languages = [];
+          state.translationPercentages = {};
           renderLanguageControls();
           return;
         }
         if (SAMPLE_MODE) {
           state.languages = sampleStore.languages.slice();
+          state.translationPercentages = {};
           renderLanguageControls();
           return;
         }
@@ -1477,9 +1484,19 @@
           }
           const data = await res.json();
           state.languages = data.languages || [];
+
+          // Fetch translation percentages
+          const percentRes = await fetch(`/api/translation-percentages?${params.toString()}`);
+          if (percentRes.ok) {
+            const percentData = await percentRes.json();
+            state.translationPercentages = percentData.percentages || {};
+          } else {
+            state.translationPercentages = {};
+          }
         } catch (error) {
           console.error(error);
           state.languages = [];
+          state.translationPercentages = {};
           setStatus("Failed to load languages", true);
         }
         renderLanguageControls();

@@ -291,6 +291,11 @@ struct UpdateLanguageParams {
     pub new_language: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ListUntranslatedParams {
+    pub path: String,
+}
+
 fn to_json_text<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|err| {
         serde_json::json!({
@@ -529,6 +534,19 @@ impl XcStringsMcpServer {
             "Language '{}' renamed to '{}' successfully",
             params.old_language, params.new_language
         )))
+    }
+
+    #[tool(
+        description = "List untranslated keys per language (empty values or duplicates across languages)"
+    )]
+    async fn list_untranslated(
+        &self,
+        params: Parameters<ListUntranslatedParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let untranslated = store.list_untranslated().await;
+        Ok(render_json(&untranslated))
     }
 }
 
@@ -2118,6 +2136,203 @@ mod tests {
         store.reload().await.expect("reload store");
         let records = store.list_records(None).await;
         assert!(records[0].extraction_state.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_tool_returns_untranslated_keys() {
+        let path = fresh_store_path("list_untranslated_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add some translations with various states
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        // key2: no French translation (will be missing)
+
+        store
+            .upsert_translation(
+                "key3",
+                "en",
+                TranslationUpdate::from_value_state(Some("Foo".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "key3",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Foo".into()), None), // Duplicate - now OK
+            )
+            .await
+            .expect("save fr translation");
+
+        // Call the MCP tool
+        let result = server
+            .list_untranslated(Parameters(ListUntranslatedParams {
+                path: path_str.clone(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Parse the JSON response
+        let payload = parse_json(&result);
+
+        // French should have only key2 (missing)
+        let fr_untranslated = payload
+            .get("fr")
+            .and_then(|v| v.as_array())
+            .expect("fr array");
+        assert_eq!(fr_untranslated.len(), 1);
+        assert!(fr_untranslated.iter().any(|v| v.as_str() == Some("key2")));
+
+        // English should have no untranslated keys
+        let en_untranslated = payload.get("en").and_then(|v| v.as_array());
+        if let Some(keys) = en_untranslated {
+            assert!(keys.is_empty());
+        }
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_tool_handles_empty_store() {
+        let path = fresh_store_path("list_untranslated_empty_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        // Call the MCP tool on empty store
+        let result = server
+            .list_untranslated(Parameters(ListUntranslatedParams {
+                path: path_str.clone(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Parse the JSON response
+        let payload = parse_json(&result);
+
+        // Should be an empty object or have only source language with empty array
+        if let Some(en_untranslated) = payload.get("en").and_then(|v| v.as_array()) {
+            assert!(en_untranslated.is_empty());
+        }
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn list_untranslated_tool_handles_fully_translated() {
+        let path = fresh_store_path("list_untranslated_complete_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        // Add fully translated keys
+        store
+            .upsert_translation(
+                "key1",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "key1",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        store
+            .upsert_translation(
+                "key2",
+                "en",
+                TranslationUpdate::from_value_state(Some("World".into()), None),
+            )
+            .await
+            .expect("save en translation");
+
+        store
+            .upsert_translation(
+                "key2",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Monde".into()), None),
+            )
+            .await
+            .expect("save fr translation");
+
+        // Call the MCP tool
+        let result = server
+            .list_untranslated(Parameters(ListUntranslatedParams {
+                path: path_str.clone(),
+            }))
+            .await
+            .expect("tool success");
+
+        // Parse the JSON response
+        let payload = parse_json(&result);
+
+        // All languages should have empty arrays
+        if let Some(en_untranslated) = payload.get("en").and_then(|v| v.as_array()) {
+            assert!(en_untranslated.is_empty());
+        }
+        if let Some(fr_untranslated) = payload.get("fr").and_then(|v| v.as_array()) {
+            assert!(fr_untranslated.is_empty());
+        }
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

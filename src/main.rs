@@ -42,12 +42,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let web_handle = {
+    let _web_handle = {
         let addr = config.web_addr;
         let manager = stores.clone();
         tokio::spawn(async move {
             if let Err(err) = web::serve(addr, manager).await {
-                warn!(?err, "Web server failed to start or stopped (MCP server continues to work)");
+                warn!(
+                    ?err,
+                    "Web server failed to start or stopped (MCP server continues to work)"
+                );
             }
         })
     };

@@ -65,6 +65,11 @@ struct LanguagesResponse {
     languages: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct TranslationPercentagesResponse {
+    percentages: std::collections::HashMap<String, f64>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct PathQuery {
     #[serde(default)]
@@ -282,6 +287,10 @@ pub fn router(manager: Arc<XcStringsStoreManager>) -> Router {
         .route("/api/extraction-state", post(update_extraction_state))
         .route("/api/should-translate", post(update_should_translate))
         .route("/api/languages", get(list_languages))
+        .route(
+            "/api/translation-percentages",
+            get(get_translation_percentages),
+        )
         .layer(Extension(manager))
 }
 
@@ -362,6 +371,15 @@ async fn list_languages(
     let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
     let languages = store.list_languages().await;
     Ok(Json(LanguagesResponse { languages }))
+}
+
+async fn get_translation_percentages(
+    Extension(manager): Extension<Arc<XcStringsStoreManager>>,
+    Query(query): Query<PathQuery>,
+) -> Result<Json<TranslationPercentagesResponse>, ApiError> {
+    let store = resolve_store(manager.as_ref(), query.path.as_deref()).await?;
+    let percentages = store.get_translation_percentages().await;
+    Ok(Json(TranslationPercentagesResponse { percentages }))
 }
 
 async fn upsert_translation(

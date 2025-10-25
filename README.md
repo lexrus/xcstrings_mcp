@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Stars](https://img.shields.io/github/stars/lexrus/xcstrings_mcp.svg)](https://github.com/lexrus/xcstrings_mcp/stargazers)
 
-A Rust implementation of a **Model Context Protocol (MCP) server** designed for working with Xcode `.xcstrings` files. It exposes the translation catalog as MCP tools and also serves a **lightweight web editor** so teams can browse, search, and edit strings from a browser.
+A Rust implementation of a **Model Context Protocol (MCP) server** designed for working with Xcode `.xcstrings` files. It exposes the translation catalog as MCP tools and optionally serves a **lightweight web editor** (when enabled via environment variables) so teams can browse, search, and edit strings from a browser.
 
 > **Note**: This project was created with AI assistance using tools like Codex and Claude Code. While we strive for quality, there may be issues or areas for improvement. We welcome bug reports, feature requests, and contributions via [GitHub Issues](https://github.com/lexrus/xcstrings_mcp/issues).
 
@@ -103,9 +103,9 @@ This MCP server provides the following functions for managing Xcode `Localizable
 ### Additional Features
 
 - **Async-safe store** that loads and persists `Localizable.xcstrings` JSON on every change
-- **Embedded Axum web UI** for browsing translations, filtering by query, editing values, plural/device variations, and managing comments
+- **Optional embedded Axum web UI** (enabled via environment variables) for browsing translations, filtering by query, editing values, plural/device variations, and managing comments
 - **Translation progress tracking** with percentage display in the language dropdown (excludes keys marked as should_translate=false)
-- **Automatic discovery** of `.xcstrings` files when no default path is provided, with a selector in the web UI for runtime catalog switching
+- **Automatic discovery** of `.xcstrings` files when no default path is provided, with a selector in the web UI for runtime catalog switching (when web UI is enabled)
 - **Device-specific variations** support (iPhone, iPad, Mac, Apple Watch, etc.) with mutual exclusivity logic between plural and device variations
 - **Inline editing** for extraction state, translation state, and substitution placeholders (including `argNum`, `formatSpecifier`, and nested plural cases)
 - **JSON-first responses** from all tools to make automation and debugging easier
@@ -130,8 +130,8 @@ This MCP server provides the following functions for managing Xcode `Localizable
 ## Running the server
 
 ```bash
-cargo run -- [path-to/Localizable.xcstrings] [port]
-# This will build and run the server against the specified file on the given port (default: 8787)
+cargo run -- [path-to/Localizable.xcstrings]
+# This will build and run the MCP server
 ```
 
 ```bash
@@ -139,18 +139,17 @@ cargo install --path .
 # This will install `xcstrings-mcp` into `~/.cargo/bin/`
 ```
 
-- `path-to/Localizable.xcstrings`: Optional. When omitted, the server scans the workspace for `.xcstrings` files. The web UI stays available with a selector (showing a placeholder when none are found), while MCP tool calls must continue to supply a `path` argument.
-- `port`: Optional. Defaults to `8787`.
+- `path-to/Localizable.xcstrings`: Optional. When omitted, the server scans the workspace for `.xcstrings` files and MCP tool calls must supply a `path` argument.
 
 You can also configure the server via environment variables:
 
-| Variable       | Description                   | Default                |
-| -------------- | ----------------------------- | ---------------------- |
-| `STRINGS_PATH` | Path to the `.xcstrings` file | _unset_ (dynamic mode) |
-| `WEB_HOST`     | Host/interface for the web UI | `127.0.0.1`            |
-| `WEB_PORT`     | Port for the web UI           | `8787`                 |
+| Variable       | Description                                           | Default                |
+| -------------- | ----------------------------------------------------- | ---------------------- |
+| `STRINGS_PATH` | Path to the `.xcstrings` file                         | _unset_ (dynamic mode) |
+| `WEB_HOST`     | Host/interface for the web UI (enables web server)   | _unset_ (disabled)     |
+| `WEB_PORT`     | Port for the web UI (enables web server)             | `8787`                 |
 
-The web interface becomes available at `http://<host>:<port>/`.
+**Note**: The web server is **disabled by default**. To enable it, you must set either `WEB_HOST` or `WEB_PORT` environment variables. When enabled, the web interface becomes available at `http://<host>:<port>/` (defaults to `http://127.0.0.1:8787/`).
 
 ### MCP usage
 
@@ -186,6 +185,41 @@ If the server starts without a default path (no CLI argument and no `STRINGS_PAT
 
 Modern MCP-aware AI clients let you register external servers through a JSON manifest.
 
+#### Basic MCP server (web UI disabled)
+
+```json
+{
+  "mcpServers": {
+    "xcstrings": {
+      "command": "/Users/you/.cargo/bin/xcstrings-mcp",
+      "transport": "stdio"
+    }
+  }
+}
+```
+
+Restart the client after saving so it loads the new MCP server definition. The `path` parameter is required in all tool calls when running in dynamic-path mode.
+
+#### With web UI enabled
+
+To enable the web UI, set the `WEB_HOST` or `WEB_PORT` environment variables:
+
+```json
+{
+  "mcpServers": {
+    "xcstrings": {
+      "command": "/Users/you/.cargo/bin/xcstrings-mcp",
+      "transport": "stdio",
+      "env": {
+        "WEB_PORT": "8787"
+      }
+    }
+  }
+}
+```
+
+You can customize both host and port:
+
 ```json
 {
   "mcpServers": {
@@ -201,9 +235,9 @@ Modern MCP-aware AI clients let you register external servers through a JSON man
 }
 ```
 
-Restart the client after saving so it loads the new MCP server definition. The `path` parameter is optional in tool calls—if not provided, the server will automatically discover all `.xcstrings` files in your project and list them in the web editor for selection.
+#### With default xcstrings path
 
-To run with a default localization file (enabling the embedded web UI and letting tools omit `path`), bake the location into the definition instead:
+To run with a default localization file (letting tools omit `path`), specify the path via arguments or environment variables:
 
 ```json
 {
@@ -213,7 +247,6 @@ To run with a default localization file (enabling the embedded web UI and lettin
       "args": ["--", "/Users/you/Projects/Localizable.xcstrings"],
       "transport": "stdio",
       "env": {
-        "WEB_HOST": "127.0.0.1",
         "WEB_PORT": "8787"
       }
     }
@@ -221,22 +254,37 @@ To run with a default localization file (enabling the embedded web UI and lettin
 }
 ```
 
-You can supply the path via `STRINGS_PATH` instead of CLI arguments if you prefer. In either case, tool calls may omit `path` and the web UI will mount the default file.
+You can supply the path via `STRINGS_PATH` instead of CLI arguments if you prefer. When a default path is configured, MCP tool calls may omit the `path` parameter.
 
 #### Claude Code
 
-`claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio","env":{"WEB_HOST": "127.0.0.1","WEB_PORT": "8787"}}'`
+Basic setup (web UI disabled):
+```bash
+claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio"}'
+```
+
+With web UI enabled:
+```bash
+claude mcp add-json xcstrings '{"command":"/Users/you/.cargo/bin/xcstrings-mcp","transport":"stdio","env":{"WEB_PORT":"8787"}}'
+```
+
 You can also add the JSON manually to `~/.claude.json`.
 
 #### Codex
 
-Add this to your `~/.codex/config.toml`:
-
+Basic setup (web UI disabled):
 ```ini
 [mcp_servers.xcstrings_mcp]
-command = "/Users/you/.cargo/bin/xcstrings_mcp"
+command = "/Users/you/.cargo/bin/xcstrings-mcp"
 args = ["--"]
-env = { WEB_HOST = "127.0.0.1", WEB_PORT = "7788" }
+```
+
+With web UI enabled:
+```ini
+[mcp_servers.xcstrings_mcp]
+command = "/Users/you/.cargo/bin/xcstrings-mcp"
+args = ["--"]
+env = { WEB_PORT = "8787" }
 ```
 
 ## Development

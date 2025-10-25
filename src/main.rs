@@ -15,12 +15,18 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    match config.path.as_ref() {
-        Some(path) => {
-            info!(path = %path.display(), web_addr = %config.web_addr, "Starting xcstrings MCP server");
+    match (&config.path, &config.web_addr) {
+        (Some(path), Some(web_addr)) => {
+            info!(path = %path.display(), web_addr = %web_addr, "Starting xcstrings MCP server with web UI");
         }
-        None => {
-            info!(web_addr = %config.web_addr, "Starting xcstrings MCP server in dynamic-path mode");
+        (Some(path), None) => {
+            info!(path = %path.display(), "Starting xcstrings MCP server (web UI disabled)");
+        }
+        (None, Some(web_addr)) => {
+            info!(web_addr = %web_addr, "Starting xcstrings MCP server in dynamic-path mode with web UI");
+        }
+        (None, None) => {
+            info!("Starting xcstrings MCP server in dynamic-path mode (web UI disabled)");
         }
     }
 
@@ -42,17 +48,18 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let _web_handle = {
-        let addr = config.web_addr;
+    let _web_handle = if let Some(addr) = config.web_addr {
         let manager = stores.clone();
-        tokio::spawn(async move {
+        Some(tokio::spawn(async move {
             if let Err(err) = web::serve(addr, manager).await {
                 warn!(
                     ?err,
                     "Web server failed to start or stopped (MCP server continues to work)"
                 );
             }
-        })
+        }))
+    } else {
+        None
     };
 
     let mcp_handle = {
@@ -86,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
 
 struct Config {
     path: Option<PathBuf>,
-    web_addr: SocketAddr,
+    web_addr: Option<SocketAddr>,
 }
 
 impl Config {
@@ -103,20 +110,23 @@ impl Config {
             candidate.map(PathBuf::from)
         };
 
-        let host =
-            env_var("WEB_HOST", "XCSTRINGS_WEB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = if let Ok(port) = env_var("WEB_PORT", "XCSTRINGS_WEB_PORT") {
-            port
-        } else {
-            args.next()
-                .and_then(|arg| arg.into_string().ok())
-                .unwrap_or_else(|| "8787".to_string())
-        };
+        // Only enable web server if environment variables are explicitly set
+        let web_addr = if env_var("WEB_HOST", "XCSTRINGS_WEB_HOST").is_ok()
+            || env_var("WEB_PORT", "XCSTRINGS_WEB_PORT").is_ok()
+        {
+            let host = env_var("WEB_HOST", "XCSTRINGS_WEB_HOST")
+                .unwrap_or_else(|_| "127.0.0.1".to_string());
+            let port =
+                env_var("WEB_PORT", "XCSTRINGS_WEB_PORT").unwrap_or_else(|_| "8787".to_string());
 
-        let port: u16 = port.parse().context("invalid web port")?;
-        let web_addr: SocketAddr = format!("{}:{}", host, port)
-            .parse()
-            .context("invalid web address")?;
+            let port: u16 = port.parse().context("invalid web port")?;
+            let addr: SocketAddr = format!("{}:{}", host, port)
+                .parse()
+                .context("invalid web address")?;
+            Some(addr)
+        } else {
+            None
+        };
 
         Ok(Self { path, web_addr })
     }

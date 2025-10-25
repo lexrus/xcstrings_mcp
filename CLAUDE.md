@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Rust implementation of a Model Context Protocol (MCP) server for working with Xcode `Localizable.xcstrings` files. The server exposes translation tools via MCP and serves a web UI for browsing/editing translations.
+This is a Rust implementation of a Model Context Protocol (MCP) server for working with Xcode `Localizable.xcstrings` files. The server exposes translation tools via MCP and optionally serves a web UI (when enabled via environment variables) for browsing/editing translations.
 
 ## Commands
 
@@ -13,7 +13,7 @@ This is a Rust implementation of a Model Context Protocol (MCP) server for worki
 - `cargo test` - Run the full test suite
 - `cargo test <testname>` - Run specific tests by name pattern
 - `cargo fmt --all` - Format code (recommended before submitting changes)
-- `cargo run -- [path-to/Localizable.xcstrings] [port]` - Run the server
+- `cargo run -- [path-to/Localizable.xcstrings]` - Run the server (web UI disabled by default, set WEB_PORT or WEB_HOST env vars to enable)
 
 ### Build & Release
 
@@ -87,7 +87,7 @@ Axum-based web UI with single-page application for:
 - Editing values and plural variations
 - Managing comments
 - Translation progress display with percentages in language dropdown
-- Only enabled when default xcstrings path is configured
+- Disabled by default; only enabled when WEB_PORT or WEB_HOST environment variables are set
 
 ### `src/main.rs`
 
@@ -95,13 +95,14 @@ Application entrypoint that:
 
 - Parses CLI args and environment variables
 - Manages dual-mode operation (default path vs dynamic path)
-- Concurrently runs MCP stdio transport and web server
+- Concurrently runs MCP stdio transport and optionally web server (if enabled via env vars)
 - Handles graceful shutdown
 
 ## Key Concepts
 
-- **Dynamic Path Mode**: No default xcstrings file configured, web UI disabled, all MCP calls must supply `path` parameter
-- **Default Path Mode**: xcstrings file path configured via CLI arg or `STRINGS_PATH` env var, enables web UI, MCP calls can omit `path`
+- **Dynamic Path Mode**: No default xcstrings file configured, all MCP calls must supply `path` parameter
+- **Default Path Mode**: xcstrings file path configured via CLI arg or `STRINGS_PATH` env var, MCP calls can omit `path`
+- **Web UI**: Disabled by default, only enabled when `WEB_PORT` or `WEB_HOST` environment variables are set
 - **XcStrings Format**: Apple's JSON-based localization format with support for plurals and variations
 - **MCP Tools**: Return JSON payloads encoded as text content for easier automation
 

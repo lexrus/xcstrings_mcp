@@ -456,6 +456,12 @@ fn sanitize_string_unit(unit: &mut XcStringUnit) {
         unit.state = None;
     }
 
+    // Apple xcstrings schema requires stringUnit.value to be a string whenever the unit exists.
+    // Ensure placeholders with a state always serialize as an empty string instead of null.
+    if unit.state.is_some() && unit.value.is_none() {
+        unit.value = Some(String::new());
+    }
+
     if unit.value.is_some() && unit.state.is_none() {
         unit.state = Some(DEFAULT_TRANSLATION_STATE.to_string());
     }
@@ -588,7 +594,7 @@ fn placeholder_localization() -> XcLocalization {
     let mut loc = XcLocalization::default();
     loc.string_unit = Some(XcStringUnit {
         state: Some(NEEDS_TRANSLATION_STATE.to_string()),
-        value: None,
+        value: Some(String::new()),
     });
     loc
 }
@@ -2815,7 +2821,7 @@ mod tests {
             .expect("lookup succeeds")
             .expect("placeholder created");
         assert_eq!(placeholder.state.as_deref(), Some(NEEDS_TRANSLATION_STATE));
-        assert!(placeholder.value.is_none());
+        assert_eq!(placeholder.value.as_deref(), Some(""));
 
         // Update translation for this language
         store
@@ -2838,6 +2844,31 @@ mod tests {
             .unwrap();
         assert_eq!(greeting.value.as_deref(), Some("Bonjour"));
         assert_eq!(greeting.state.as_deref(), Some(DEFAULT_TRANSLATION_STATE));
+    }
+
+    #[tokio::test]
+    async fn placeholder_writes_empty_value_in_file() {
+        let tmp = TempStorePath::new("placeholder_empty_value");
+        let store = XcStringsStore::load_or_create(&tmp.file).await.unwrap();
+
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .unwrap();
+
+        store.add_language("th").await.unwrap();
+
+        let raw = fs::read_to_string(&tmp.file).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        let placeholder_value =
+            parsed["strings"]["greeting"]["localizations"]["th"]["stringUnit"]["value"].as_str();
+
+        assert_eq!(placeholder_value, Some(""));
     }
 
     #[tokio::test]

@@ -974,7 +974,7 @@ mod tests {
             .expect("lookup succeeds")
             .expect("placeholder created");
         assert_eq!(placeholder.state.as_deref(), Some("needs-translation"));
-        assert!(placeholder.value.is_none());
+        assert_eq!(placeholder.value.as_deref(), Some(""));
 
         // But we can add translations for this language
         store

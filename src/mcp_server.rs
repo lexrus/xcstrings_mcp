@@ -248,6 +248,14 @@ struct SetCommentParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct SetTranslationStateParams {
+    pub path: String,
+    pub key: String,
+    pub language: String,
+    pub state: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct SetExtractionStateParams {
     pub path: String,
     pub key: String,
@@ -457,6 +465,20 @@ impl XcStringsMcpServer {
             .await
             .map_err(Self::error_to_mcp)?;
         Ok(render_ok_message("Comment updated"))
+    }
+
+    #[tool(description = "Set or clear the translation state for a language entry")]
+    async fn set_translation_state(
+        &self,
+        params: Parameters<SetTranslationStateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let params = params.0;
+        let store = self.store_for(Some(params.path.as_str())).await?;
+        let updated = store
+            .set_translation_state(&params.key, &params.language, params.state.clone())
+            .await
+            .map_err(Self::error_to_mcp)?;
+        Ok(render_translation_value(Some(updated)))
     }
 
     #[tool(description = "Set or clear the extraction state for a string key")]
@@ -915,6 +937,95 @@ mod tests {
             .expect("tool success");
         let records = store.list_records(None).await;
         assert!(records[0].extraction_state.is_none());
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_translation_state_tool_updates_entry() {
+        let path = fresh_store_path("set_translation_state_tool");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("seed store");
+
+        store
+            .upsert_translation(
+                "message",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("seed translation");
+
+        server
+            .set_translation_state(Parameters(SetTranslationStateParams {
+                path: path_str.clone(),
+                key: "message".into(),
+                language: "fr".into(),
+                state: Some("needs-review".into()),
+            }))
+            .await
+            .expect("tool success");
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+
+        let translation = store
+            .get_translation("message", "fr")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        assert_eq!(translation.value.as_deref(), Some("Bonjour"));
+        assert_eq!(translation.state.as_deref(), Some("needs-review"));
+
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[tokio::test]
+    async fn set_translation_state_tool_creates_placeholder() {
+        let path = fresh_store_path("set_translation_state_tool_placeholder");
+        let path_str = path.to_str().unwrap().to_string();
+        let manager = Arc::new(
+            XcStringsStoreManager::new(None)
+                .await
+                .expect("create manager"),
+        );
+        let server = XcStringsMcpServer::new(manager.clone());
+
+        server
+            .set_translation_state(Parameters(SetTranslationStateParams {
+                path: path_str.clone(),
+                key: "welcome".into(),
+                language: "es".into(),
+                state: Some("needs-translation".to_string()),
+            }))
+            .await
+            .expect("tool success");
+
+        let store = manager
+            .store_for(Some(path_str.as_str()))
+            .await
+            .expect("load store");
+        let translation = store
+            .get_translation("welcome", "es")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        assert_eq!(translation.state.as_deref(), Some("needs-translation"));
+        assert_eq!(translation.value.as_deref(), Some(""));
 
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

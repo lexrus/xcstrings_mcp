@@ -445,10 +445,26 @@ fn is_blank(value: &Option<String>) -> bool {
     value.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true)
 }
 
+/// Ensures localized values with real content have a translated state rather than
+/// remaining in a placeholder or empty state.
+fn ensure_translated_state_when_value_present(unit: &mut XcStringUnit) {
+    let has_real_value = unit
+        .value
+        .as_ref()
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false);
+
+    if has_real_value && matches!(unit.state.as_deref(), None | Some(NEEDS_TRANSLATION_STATE)) {
+        unit.state = Some(DEFAULT_TRANSLATION_STATE.to_string());
+    }
+}
+
 fn sanitize_string_unit(unit: &mut XcStringUnit) {
+    let value_is_blank = is_blank(&unit.value);
+
     // Only remove empty values if there's no explicit state
     // This allows empty placeholders with state (e.g., "new") to persist
-    if is_blank(&unit.value) && unit.state.is_none() {
+    if value_is_blank && unit.state.is_none() {
         unit.value = None;
     }
 
@@ -462,9 +478,7 @@ fn sanitize_string_unit(unit: &mut XcStringUnit) {
         unit.value = Some(String::new());
     }
 
-    if unit.value.is_some() && unit.state.is_none() {
-        unit.state = Some(DEFAULT_TRANSLATION_STATE.to_string());
-    }
+    ensure_translated_state_when_value_present(unit);
 }
 
 fn string_unit_has_content(unit: &XcStringUnit) -> bool {
@@ -1525,6 +1539,17 @@ impl XcStringsStore {
         drop(doc);
         fs::write(&self.path, serialized).await?;
         Ok(())
+    }
+
+    pub async fn set_translation_state(
+        &self,
+        key: &str,
+        language: &str,
+        state: Option<String>,
+    ) -> Result<TranslationValue, StoreError> {
+        let mut update = TranslationUpdate::default();
+        update.state = Some(state);
+        self.upsert_translation(key, language, update).await
     }
 
     pub async fn set_comment(&self, key: &str, comment: Option<String>) -> Result<(), StoreError> {
@@ -2844,6 +2869,100 @@ mod tests {
             .unwrap();
         assert_eq!(greeting.value.as_deref(), Some("Bonjour"));
         assert_eq!(greeting.state.as_deref(), Some(DEFAULT_TRANSLATION_STATE));
+    }
+
+    #[tokio::test]
+    async fn placeholder_state_promotes_when_value_is_added() {
+        let tmp = TempStorePath::new("promote_placeholder_state");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .upsert_translation(
+                "greeting",
+                "en",
+                TranslationUpdate::from_value_state(Some("Hello".into()), None),
+            )
+            .await
+            .expect("seed base translation");
+
+        store.add_language("fr").await.expect("add language");
+
+        // Update only the value (no explicit state), simulating the web UI payload.
+        let mut update = TranslationUpdate::default();
+        update.value = Some(Some("Bonjour".into()));
+        store
+            .upsert_translation("greeting", "fr", update)
+            .await
+            .expect("update translation");
+
+        let greeting = store
+            .get_translation("greeting", "fr")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        assert_eq!(greeting.value.as_deref(), Some("Bonjour"));
+        assert_eq!(greeting.state.as_deref(), Some(DEFAULT_TRANSLATION_STATE));
+    }
+
+    #[tokio::test]
+    async fn set_translation_state_creates_placeholder() {
+        let tmp = TempStorePath::new("set_translation_state_placeholder");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        let translation = store
+            .set_translation_state("welcome", "es", Some(NEEDS_TRANSLATION_STATE.to_string()))
+            .await
+            .expect("set state");
+
+        assert_eq!(translation.state.as_deref(), Some(NEEDS_TRANSLATION_STATE));
+        assert_eq!(translation.value.as_deref(), Some(""));
+
+        let fetched = store
+            .get_translation("welcome", "es")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+
+        assert_eq!(fetched.state.as_deref(), Some(NEEDS_TRANSLATION_STATE));
+        assert_eq!(fetched.value.as_deref(), Some(""));
+    }
+
+    #[tokio::test]
+    async fn set_translation_state_updates_existing_entry() {
+        let tmp = TempStorePath::new("set_translation_state_updates");
+        let store = XcStringsStore::load_or_create(&tmp.file)
+            .await
+            .expect("load store");
+
+        store
+            .upsert_translation(
+                "welcome",
+                "fr",
+                TranslationUpdate::from_value_state(Some("Bonjour".into()), None),
+            )
+            .await
+            .expect("seed translation");
+
+        let updated = store
+            .set_translation_state("welcome", "fr", Some("needs-review".into()))
+            .await
+            .expect("set state");
+
+        assert_eq!(updated.value.as_deref(), Some("Bonjour"));
+        assert_eq!(updated.state.as_deref(), Some("needs-review"));
+
+        let fetched = store
+            .get_translation("welcome", "fr")
+            .await
+            .expect("fetch translation")
+            .expect("translation exists");
+        assert_eq!(fetched.value.as_deref(), Some("Bonjour"));
+        assert_eq!(fetched.state.as_deref(), Some("needs-review"));
     }
 
     #[tokio::test]

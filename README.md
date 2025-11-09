@@ -64,6 +64,13 @@ This MCP server provides the following functions for managing Xcode `Localizable
   - `comment`: Developer comment text (optional, omit to clear)
   - Returns: Success confirmation
 
+- **`set_translation_state(path, key, language, state?)`** - Set or clear the translation state for a specific language entry
+  - `path`: Path to the `.xcstrings` file
+  - `key`: Translation key identifier
+  - `language`: Language code for the localization to update
+  - `state`: Translation state value (optional, omit to clear; defaults back to `"translated"` when a non-empty value exists)
+  - Returns: Updated translation value
+
 - **`set_extraction_state(path, key, extractionState?)`** - Set or clear the extraction state for a string key
   - `path`: Path to the `.xcstrings` file
   - `key`: Translation key identifier
